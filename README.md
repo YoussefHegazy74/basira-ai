@@ -53,6 +53,7 @@ basira-ai/
 | Tafsir Ibn Kathir (10 vols) | PDF | ~518 MB | ✅ Collected |
 
 > ⚠️ Raw data is stored on Google Drive (too large for GitHub).
+> 📁 [Tafsir Ibn Kathir PDFs — Google Drive](https://drive.google.com/drive/folders/1bfVkbQJrCVrQTZ21M5iQEPWuXrzBna_x?usp=sharing)
 
 ---
 
