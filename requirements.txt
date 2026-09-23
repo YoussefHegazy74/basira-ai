@@ -1,0 +1,31 @@
+# Arabic NLP
+camel-tools
+nltk
+pyarabic
+
+# Embeddings
+sentence-transformers
+openai
+
+# Vector Database
+faiss-cpu
+chromadb
+
+# RAG
+langchain
+langchain-community
+langchain-openai
+
+# PDF Processing
+pdfplumber
+pymupdf
+
+# Backend
+fastapi
+uvicorn
+python-dotenv
+
+# Utilities
+tqdm
+pandas
+numpy
