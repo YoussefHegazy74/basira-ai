@@ -32,3 +32,5 @@ Thumbs.db
 *.ckpt
 faiss_index/
 chroma_db/
+!data/raw/**
+!data/raw/*.json
