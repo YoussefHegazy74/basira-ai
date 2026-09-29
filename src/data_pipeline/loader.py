@@ -1,7 +1,7 @@
 """
 Basira Data Pipeline — Loader
 ==============================
-Loads processed Quran and Hadith JSON datasets for the RAG pipeline.
+Loads processed Quran, Hadith, and Tafsir JSON datasets for the RAG pipeline.
 Each record follows the unified schema: id, source, reference, arabic_text, metadata.
 """
 
@@ -52,22 +52,39 @@ def load_hadith(path: str | Path = 'data/raw/hadith/hadith_processed.json') -> l
     return records
 
 
+def load_tafsir(path: str | Path = 'data/raw/tafsir/tafsir_processed.json') -> list[dict]:
+    """Load the processed Tafsir dataset.
+
+    Args:
+        path: Path to tafsir_processed.json (default: relative project path).
+
+    Returns:
+        List of record dicts with keys: id, source, reference, arabic_text, metadata.
+    """
+    records = _load_json(path)
+    print(f'[loader] Loaded {len(records):,} Tafsir records from {path}')
+    return records
+
+
 def load_all(
     quran_path: str | Path = 'data/raw/quran/quran_processed.json',
     hadith_path: str | Path = 'data/raw/hadith/hadith_processed.json',
+    tafsir_path: str | Path = 'data/raw/tafsir/tafsir_processed.json',
 ) -> list[dict]:
-    """Load both Quran and Hadith datasets into a single combined list.
+    """Load Quran, Hadith, and Tafsir datasets into a single combined list.
 
     Args:
         quran_path:  Path to quran_processed.json.
         hadith_path: Path to hadith_processed.json.
+        tafsir_path: Path to tafsir_processed.json.
 
     Returns:
-        Combined list of all records (Quran first, then Hadith).
+        Combined list of all records (Quran first, then Hadith, then Tafsir).
     """
     quran = load_quran(quran_path)
     hadith = load_hadith(hadith_path)
-    combined = quran + hadith
+    tafsir = load_tafsir(tafsir_path)
+    combined = quran + hadith + tafsir
 
     # Print summary breakdown
     source_counts = Counter(r.get('source', 'unknown') for r in combined)
@@ -85,8 +102,9 @@ if __name__ == '__main__':
 
     quran_path = 'data/raw/quran/quran_processed.json'
     hadith_path = 'data/raw/hadith/hadith_processed.json'
+    tafsir_path = 'data/raw/tafsir/tafsir_processed.json'
 
-    all_records = load_all(quran_path, hadith_path)
+    all_records = load_all(quran_path, hadith_path, tafsir_path)
 
     # First Quran record
     quran_first = next(r for r in all_records if r['source'] == 'quran')
@@ -97,5 +115,10 @@ if __name__ == '__main__':
     hadith_first = next(r for r in all_records if r['source'] == 'hadith')
     print('\n--- First Hadith Record ---')
     pprint.pprint(hadith_first, width=100)
+
+    # First Tafsir record
+    tafsir_first = next(r for r in all_records if r['source'] == 'tafsir')
+    print('\n--- First Tafsir Record ---')
+    pprint.pprint(tafsir_first, width=100)
 
     print(f'\nTotal records loaded: {len(all_records):,}')

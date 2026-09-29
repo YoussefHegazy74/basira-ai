@@ -75,15 +75,34 @@ def chunk_all(records: list[dict]) -> list[dict]:
 if __name__ == '__main__':
     import pprint
 
-    sample = {
-        'id': 'quran_1_1',
-        'source': 'quran',
-        'reference': 'الفاتحة:1',
-        'arabic_text': 'بِسۡمِ ٱللَّهِ ٱلرَّحۡمَٰنِ ٱلرَّحِيمِ',
-        'metadata': {},
-    }
+    samples = [
+        {
+            'id': 'quran_1_1',
+            'source': 'quran',
+            'reference': 'الفاتحة:1',
+            'arabic_text': 'بِسۡمِ ٱللَّهِ ٱلرَّحۡمَٰنِ ٱلرَّحِيمِ',
+            'metadata': {},
+        },
+        {
+            'id': 'hadith_bukhari_1',
+            'source': 'hadith',
+            'reference': 'صحيح البخاري 1',
+            'arabic_text': 'إِنَّمَا الْأَعْمَالُ بِالنِّيَّاتِ',
+            'metadata': {'collection': 'bukhari', 'number': 1},
+        },
+        {
+            'id': 'tafsir_ibnkathir_1_1',
+            'source': 'tafsir',
+            'reference': 'تفسير ابن كثير 1:1',
+            'arabic_text': 'بِسْمِ اللَّهِ الرَّحْمَنِ الرَّحِيمِ فَاتِحَةُ الْكِتَابِ',
+            'metadata': {'surah_number': 1, 'ayah_number': 1},
+        },
+    ]
 
-    chunk = chunk_record(sample)
+    print('=== Chunker Test ===\n')
+    for sample in samples:
+        chunk = chunk_record(sample)
+        print(f'--- {sample["source"].title()} Chunk ---')
+        pprint.pprint(chunk, width=100)
+        print()
 
-    print('=== Chunker Test ===')
-    pprint.pprint(chunk, width=100)
