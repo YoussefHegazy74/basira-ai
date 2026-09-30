@@ -99,7 +99,7 @@ Raw Data (Quran + Hadith + Tafsir)
 
 - [x] Data collection (Quran, Hadith, Tafsir)
 - [x] UI/UX design
-- [ ] Data pipeline & NLP preprocessing
+- [x] Data pipeline & NLP preprocessing
 - [ ] Embeddings & Vector DB
 - [ ] RAG system
 - [ ] Backend (FastAPI)

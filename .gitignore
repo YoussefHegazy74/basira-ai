@@ -30,6 +30,8 @@ Thumbs.db
 *.bin
 *.pt
 *.ckpt
+*.pkl
+*.faiss
 faiss_index/
 chroma_db/
 !data/raw/**
