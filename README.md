@@ -121,4 +121,4 @@ Raw Data (Quran + Hadith + Tafsir)
 ---
 
 ## 🏫 Faculty of Electronic Engineering — Menoufia University
-> Graduation Project — Computer & Communications Engineering Department
+> Graduation Project — Computer Science Engineering Department
