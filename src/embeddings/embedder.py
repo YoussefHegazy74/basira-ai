@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 from openai import OpenAI
 from tqdm import tqdm
 
-EMBEDDING_MODEL = 'text-embedding-3-small'
+EMBEDDING_MODEL = "text-embedding-3-small"
 
 
 def get_client() -> OpenAI:
@@ -27,7 +27,7 @@ def get_client() -> OpenAI:
     """
     load_dotenv()
     client = OpenAI()
-    print(f'[embedder] OpenAI client initialised (model: {EMBEDDING_MODEL})')
+    print(f"[embedder] OpenAI client initialised (model: {EMBEDDING_MODEL})")
     return client
 
 
@@ -70,9 +70,9 @@ def embed_chunks(
     total = len(chunks)
     embedded_count = 0
 
-    for i in tqdm(range(0, total, batch_size), desc='Embedding chunks', unit='batch'):
+    for i in tqdm(range(0, total, batch_size), desc="Embedding chunks", unit="batch"):
         batch = chunks[i : i + batch_size]
-        texts = [chunk['clean_text'] for chunk in batch]
+        texts = [chunk["clean_text"] for chunk in batch]
 
         response = client.embeddings.create(
             input=texts,
@@ -80,12 +80,12 @@ def embed_chunks(
         )
 
         for chunk, item in zip(batch, response.data):
-            chunk['embedding'] = item.embedding
+            chunk["embedding"] = item.embedding
 
         embedded_count += len(batch)
 
-    dim = len(chunks[0]['embedding']) if chunks else 0
-    print(f'[embedder] Embedded {embedded_count:,} chunks (dim={dim})')
+    dim = len(chunks[0]["embedding"]) if chunks else 0
+    print(f"[embedder] Embedded {embedded_count:,} chunks (dim={dim})")
     return chunks
 
 
@@ -98,9 +98,9 @@ def save_embeddings(chunks: list[dict], path: str | Path) -> None:
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'wb') as f:
+    with open(path, "wb") as f:
         pickle.dump(chunks, f, protocol=pickle.HIGHEST_PROTOCOL)
-    print(f'[embedder] Saved {len(chunks):,} embedded chunks to {path}')
+    print(f"[embedder] Saved {len(chunks):,} embedded chunks to {path}")
 
 
 def load_embeddings(path: str | Path) -> list[dict]:
@@ -114,15 +114,21 @@ def load_embeddings(path: str | Path) -> list[dict]:
     """
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError(f'Embeddings file not found: {path}')
-    with open(path, 'rb') as f:
+        raise FileNotFoundError(f"Embeddings file not found: {path}")
+    with open(path, "rb") as f:
         chunks = pickle.load(f)
-    print(f'[embedder] Loaded {len(chunks):,} embedded chunks from {path}')
+    print(f"[embedder] Loaded {len(chunks):,} embedded chunks from {path}")
     return chunks
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
+    # Load client
     client = get_client()
-    print('OpenAI client loaded successfully')
-    print('Ready to embed — add your API key to .env to start')
-    print(f'Embedding model: {EMBEDDING_MODEL}')
+
+    # Embed a single Arabic text
+    embedding = embed_text("الدين النصيحة", client)
+
+    # Print results
+    print(f"Embedding shape: {len(embedding)}")
+    print(f"First 5 values: {embedding[:5]}")
+    print("Embeddings working successfully")
