@@ -25,6 +25,8 @@ from src.vector_db.faiss_store import build_index, save_index
 QURAN_PATH = "data/raw/quran/quran_processed.json"
 HADITH_PATH = "data/raw/hadith/hadith_processed.json"
 TAFSIR_PATH = "data/raw/tafsir/tafsir_processed.json"
+FIQH_PATH = "data/raw/fiqh/fiqh_processed.json"
+SIRA_PATH = "data/raw/sira/sira_processed.json"
 
 PROCESSED_DIR = Path("data/processed")
 EMBEDDINGS_PATH = PROCESSED_DIR / "embeddings.pkl"
@@ -56,6 +58,8 @@ if __name__ == "__main__":
         quran_path=QURAN_PATH,
         hadith_path=HADITH_PATH,
         tafsir_path=TAFSIR_PATH,
+        fiqh_path=FIQH_PATH,
+        sira_path=SIRA_PATH,
     )
 
     print(f"⏱  Loading took {_fmt_time(time.time() - t0)}")
@@ -76,9 +80,10 @@ if __name__ == "__main__":
     # Confirmation before embedding (costs money)
     # ------------------------------------------------------------------
     total_chunks = len(chunks)
+    print(f"\n📊  Total chunks to embed: {total_chunks:,}")
     answer = input(
-        f"\nAbout to embed {total_chunks:,} chunks. "
-        f"This will cost ~$0.05 and take ~10 minutes. Continue? (y/n) "
+        f"\nAbout to embed {total_chunks:,} chunks (Quran + Hadith + Tafsir + Fiqh + Sira). "
+        f"Continue? (y/n) "
     )
     if answer.strip().lower() != "y":
         print("Aborted by user.")

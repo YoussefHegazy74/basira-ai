@@ -1,7 +1,7 @@
 """
 Basira Data Pipeline — Loader
 ==============================
-Loads processed Quran, Hadith, and Tafsir JSON datasets for the RAG pipeline.
+Loads processed Quran, Hadith, Tafsir, Fiqh, and Sira JSON datasets for the RAG pipeline.
 Each record follows the unified schema: id, source, reference, arabic_text, metadata.
 """
 
@@ -66,25 +66,71 @@ def load_tafsir(path: str | Path = 'data/raw/tafsir/tafsir_processed.json') -> l
     return records
 
 
+def load_fiqh(path: str | Path = 'data/raw/fiqh/fiqh_processed.json') -> list[dict]:
+    """Load the processed Fiqh dataset.
+
+    Args:
+        path: Path to fiqh_processed.json (default: relative project path).
+
+    Returns:
+        List of record dicts with keys: id, source, reference, arabic_text, metadata.
+    """
+    records = _load_json(path)
+    print(f'[loader] Loaded {len(records):,} Fiqh records from {path}')
+    return records
+
+
+def load_sira(path: str | Path = 'data/raw/sira/sira_processed.json') -> list[dict]:
+    """Load the processed Sira dataset.
+
+    Args:
+        path: Path to sira_processed.json (default: relative project path).
+
+    Returns:
+        List of record dicts with keys: id, source, reference, arabic_text, metadata.
+    """
+    records = _load_json(path)
+    print(f'[loader] Loaded {len(records):,} Sira records from {path}')
+    return records
+
+
 def load_all(
     quran_path: str | Path = 'data/raw/quran/quran_processed.json',
     hadith_path: str | Path = 'data/raw/hadith/hadith_processed.json',
     tafsir_path: str | Path = 'data/raw/tafsir/tafsir_processed.json',
+    fiqh_path: str | Path | None = None,
+    sira_path: str | Path | None = None,
 ) -> list[dict]:
-    """Load Quran, Hadith, and Tafsir datasets into a single combined list.
+    """Load all datasets into a single combined list.
 
     Args:
         quran_path:  Path to quran_processed.json.
         hadith_path: Path to hadith_processed.json.
         tafsir_path: Path to tafsir_processed.json.
+        fiqh_path:   Path to fiqh_processed.json (optional, loaded if provided and exists).
+        sira_path:   Path to sira_processed.json (optional, loaded if provided and exists).
 
     Returns:
-        Combined list of all records (Quran first, then Hadith, then Tafsir).
+        Combined list of all records.
     """
     quran = load_quran(quran_path)
     hadith = load_hadith(hadith_path)
     tafsir = load_tafsir(tafsir_path)
     combined = quran + hadith + tafsir
+
+    # Optionally load Fiqh
+    if fiqh_path is not None and Path(fiqh_path).exists():
+        fiqh = load_fiqh(fiqh_path)
+        combined += fiqh
+    elif fiqh_path is not None:
+        print(f'[loader] Fiqh file not found, skipping: {fiqh_path}')
+
+    # Optionally load Sira
+    if sira_path is not None and Path(sira_path).exists():
+        sira = load_sira(sira_path)
+        combined += sira
+    elif sira_path is not None:
+        print(f'[loader] Sira file not found, skipping: {sira_path}')
 
     # Print summary breakdown
     source_counts = Counter(r.get('source', 'unknown') for r in combined)
