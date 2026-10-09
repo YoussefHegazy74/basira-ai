@@ -36,3 +36,7 @@ faiss_index/
 chroma_db/
 !data/raw/**
 !data/raw/*.json
+
+# Backend 
+Backend/.env
+Backend/node_modules/
