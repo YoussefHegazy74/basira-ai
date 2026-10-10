@@ -56,16 +56,26 @@ def retrieve(
     return results
 
 
-def build_prompt(query: str, retrieved_chunks: list[dict]) -> list[dict]:
+def build_prompt(
+    query: str,
+    retrieved_chunks: list[dict],
+    chat_history: list[dict] | None = None,
+) -> list[dict]:
     """Build an Arabic-aware prompt for GPT-4o-mini.
 
     Constructs the system message and a user message that includes the
     original query and the retrieved source texts with their references.
+    Optionally prepends recent chat history to give the model
+    conversational context.
 
     Args:
         query:             The user's original question.
         retrieved_chunks:  List of result dicts from retrieve(), each with
                            'original_text', 'reference', and 'source'.
+        chat_history:      Optional list of previous messages, each a dict
+                           with 'role' ("user"/"assistant") and 'content'.
+                           Only the last 3 exchanges (6 messages max) are
+                           kept to control token cost.
 
     Returns:
         List of message dicts in OpenAI chat format.
@@ -88,10 +98,21 @@ def build_prompt(query: str, retrieved_chunks: list[dict]) -> list[dict]:
         f"الإجابة:"
     )
 
-    messages = [
+    # --- Assemble messages -------------------------------------------------
+    # 1. System message
+    messages: list[dict] = [
         {"role": "system", "content": SYSTEM_MESSAGE},
-        {"role": "user", "content": user_message},
     ]
+
+    # 2. Chat history (limited to last 3 exchanges = 6 messages max)
+    if chat_history:
+        MAX_HISTORY_MESSAGES = 6  # 3 exchanges × 2 messages each
+        limited_history = chat_history[-MAX_HISTORY_MESSAGES:]
+        messages.extend(limited_history)
+
+    # 3. Current user query with retrieved context
+    messages.append({"role": "user", "content": user_message})
+
     return messages
 
 
@@ -100,16 +121,19 @@ def generate(
     index,
     chunks: list[dict],
     client: OpenAI,
+    chat_history: list[dict] | None = None,
     top_k: int = 5,
 ) -> dict:
     """Run the full RAG pipeline: retrieve → build prompt → generate answer.
 
     Args:
-        query:   Raw user question in Arabic.
-        index:   A FAISS index built by faiss_store.build_index.
-        chunks:  The chunk dicts aligned with the index.
-        client:  An authenticated OpenAI client.
-        top_k:   Number of source chunks to retrieve.
+        query:         Raw user question in Arabic.
+        index:         A FAISS index built by faiss_store.build_index.
+        chunks:        The chunk dicts aligned with the index.
+        client:        An authenticated OpenAI client.
+        chat_history:  Optional list of previous messages for multi-turn
+                       conversation context.
+        top_k:         Number of source chunks to retrieve.
 
     Returns:
         Dict with keys:
@@ -119,7 +143,7 @@ def generate(
     """
     retrieved = retrieve(query, index, chunks, client, top_k=top_k)
 
-    messages = build_prompt(query, retrieved)
+    messages = build_prompt(query, retrieved, chat_history=chat_history)
 
     response = client.chat.completions.create(
         model=GENERATION_MODEL,
@@ -143,7 +167,7 @@ def generate(
 
 
 if __name__ == "__main__":
-    # Verify imports and client without making API calls
-    client = get_client()
-    print("RAG pipeline ready — connect a real FAISS index to test generation")
-    print("Pipeline modules imported successfully")
+    import inspect
+
+    print("Pipeline updated — chat_history parameter added successfully")
+    print(f"generate() signature: {inspect.signature(generate)}")
