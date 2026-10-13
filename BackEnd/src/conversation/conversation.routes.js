@@ -1,0 +1,11 @@
+const express = require("express");
+const router = express.Router();
+const conversationController = require("./conversation.controller.js");
+const authMiddleware = require("../middleware/auth.middleware.js");
+router.use(authMiddleware.protect);
+router.post("/", conversationController.createConversation);
+router.get("/", conversationController.getUserConversations);
+router.get("/:conversationId", conversationController.getConversationById);
+router.put("/:conversationId", conversationController.renameConversation);
+router.delete("/:conversationId", conversationController.deleteConversation);
+module.exports = router;

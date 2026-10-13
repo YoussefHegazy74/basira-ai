@@ -14,7 +14,13 @@ const register = asyncWrapper(async (req, res, next) => {
 });
 const login = asyncWrapper(async (req, res, next) => {
   const { token } = await AuthService.login(req.body);
-  res.status(200).json({ status: HttpStatus.SUCCESS, token });
+  res.cookie("token", token, {
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    secure: true,
+  });
+  res.status(200).json({ status: HttpStatus.SUCCESS });
 });
 const forgotPassword = asyncWrapper(async (req, res, next) => {
   await AuthService.forgotPassword(req, res);
@@ -40,10 +46,15 @@ const changePassword = asyncWrapper(async (req, res, next) => {
     req.body.currentPassword,
     req.body.newPassword,
   );
+  res.cookie("token", token, {
+    httpOnly: true,
+    sameSite: "lax",
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    secure: true,
+  });
   res.status(200).json({
     status: HttpStatus.SUCCESS,
     message: "Password has been changed successfully.",
-    token,
   });
 });
 const verifyEmail = asyncWrapper(async (req, res, next) => {

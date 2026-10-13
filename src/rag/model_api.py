@@ -36,6 +36,7 @@ class TafsirRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     query: str
+    chat_history: list[str] | None = None
 
 
 @app.post("/api/verify")
@@ -66,6 +67,7 @@ def chat(request: ChatRequest):
         index,
         chunks,
         client,
+        request.chat_history
     )
 
 

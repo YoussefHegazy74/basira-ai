@@ -40,9 +40,8 @@ const register = async ({
   passwordconfirm,
 }) => {
   if (await User.exists({ email })) {
-    throw new AppError(400, "Email already exists", HttpStatus.BAD_REQUEST);
+    await pendingUserModel.deleteMany({ email });
   }
-  await pendingUserModel.deleteMany({ email });
   const verificationToken = generateVerificationCode();
   const tempUser = await pendingUserModel.create({
     firstName,
@@ -234,7 +233,7 @@ const resetPassword = async (token, newPassword, newPasswordConfirm) => {
   user.password = await bcrypt.hash(newPassword, 10);
   user.resetPasswordToken = undefined;
   user.resetPasswordTokenExpiresAt = undefined;
-  user.passwordChangedAt = Date.now();
+  user.passwordChangedAt = Date.now() - 1000;
   await user.save();
 };
 /// change password
@@ -259,7 +258,7 @@ const changePassword = async (userId, currentPassword, newPassword) => {
     );
   }
   user.password = await bcrypt.hash(newPassword, 10);
-  user.passwordChangedAt = Date.now();
+  user.passwordChangedAt = Date.now() - 1000;
   await user.save();
   // new token, because the old one is invalidated by passwordChangedAt
   return signToken(user._id);
@@ -304,6 +303,14 @@ const verifyEmail = async (token, email) => {
   await pendingUserModel.deleteOne({ _id: pendingUser._id });
   return;
 };
+///// logout
+const logout = async (req, res) => {
+  res.clearCookie("token", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: true,
+  });
+};
 module.exports = {
   register,
   login,
@@ -311,4 +318,5 @@ module.exports = {
   resetPassword,
   changePassword,
   verifyEmail,
+  logout,
 };
