@@ -33,11 +33,12 @@ class VerifyRequest(BaseModel):
 class TafsirRequest(BaseModel):
     ayah: str
 
-
+class ChatMessage(BaseModel):
+    role: str
+    content: str
 class ChatRequest(BaseModel):
     query: str
-    chat_history: list[str] | None = None
-
+    chat_history: list[ChatMessage] | None = None
 
 @app.post("/api/verify")
 def verify(request: VerifyRequest):

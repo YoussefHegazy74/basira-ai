@@ -31,7 +31,7 @@ const consume = async (ownerKey, limit) => {
 
   if (await increment()) return;
 
-  throw new AppError(429, "Daily usage limit reached", httpStatusText.FAIL);
+  throw new AppError(429, "Daily usage limit reached", HttpStatus.FAIL);
 };
 ////////// get usage for a user
 const getUsage = async (userId) => {
@@ -50,9 +50,18 @@ const getUsage = async (userId) => {
   };
 };
 
-///
+/// reset usage for a user
+const resetUsage = async (userId) => {
+  await Usage.deleteOne({ ownerKey: String(userId) });
+};
+// reset usage for all users
+const resetAllUsage = async () => {
+  await Usage.deleteMany({});
+};
 module.exports = {
   identify,
   consume,
   getUsage,
+  resetUsage,
+  resetAllUsage,
 };

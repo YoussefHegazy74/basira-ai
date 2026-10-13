@@ -27,7 +27,7 @@ const protect = async (req, res, next) => {
 
     if (!token) {
       return next(
-        new AppError("You are not logged in", 401, HttpStatusText.FAIL),
+        new AppError( 401, "You are not logged in", HttpStatusText.FAIL),
       );
     }
 
@@ -36,15 +36,15 @@ const protect = async (req, res, next) => {
 
     if (!currentUser) {
       return next(
-        new AppError("User no longer exists", 401, HttpStatusText.FAIL),
+        new AppError( 401, "User no longer exists", HttpStatusText.FAIL),
       );
     }
 
     if (currentUser.changedPasswordAfter(decoded.iat)) {
       return next(
         new AppError(
-          "User recently changed password! Please log in again.",
           401,
+          "User recently changed password! Please log in again.",
           HttpStatusText.FAIL,
         ),
       );
@@ -53,7 +53,7 @@ const protect = async (req, res, next) => {
     req.user = currentUser;
     next();
   } catch (err) {
-    next(new AppError("Invalid token", 401, HttpStatusText.FAIL));
+    next(new AppError( 401, "Invalid token", HttpStatusText.FAIL));
   }
 };
 
@@ -69,15 +69,15 @@ const optionalAuth = async (req, res, next) => {
 
     if (!currentUser) {
       return next(
-        new AppError("User no longer exists", 401, HttpStatusText.FAIL),
+        new AppError( 401, "User no longer exists", HttpStatusText.FAIL),
       );
     }
 
     if (currentUser.changedPasswordAfter(decoded.iat)) {
       return next(
         new AppError(
-          "User recently changed password! Please log in again.",
           401,
+          "User recently changed password! Please log in again.",
           HttpStatusText.FAIL,
         ),
       );
@@ -86,7 +86,7 @@ const optionalAuth = async (req, res, next) => {
     req.user = currentUser;
     next();
   } catch (err) {
-    next(new AppError("Invalid token", 401, HttpStatusText.FAIL));
+    next(new AppError( 401, "Invalid token", HttpStatusText.FAIL));
   }
 };
 

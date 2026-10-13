@@ -78,8 +78,8 @@ const sanitizeGuestInput = (message, chatHistory) => {
 /// guest -> history comes from the request, nothing is saved in db
 const sendGuestMessage = async (message, chatHistory, guestKey) => {
   const { query, cleanHistory } = sanitizeGuestInput(message, chatHistory);
-  const { ownerKey, limit } = identify(null, guestKey);
-  await consume(ownerKey, limit);
+  const { ownerKey, limit } = UsageService.identify(null, guestKey);
+  await UsageService.consume(ownerKey, limit);
   const { answer, sources } = await askModel(query, cleanHistory);
   return { answer, sources };
 };
@@ -97,8 +97,8 @@ const sendUserMessage = async ({ userId, conversationId, content }) => {
       HttpStatus.BAD_REQUEST,
     );
   }
-  const { ownerKey, limit } = identify(userId);
-  await consume(ownerKey, limit);
+  const { ownerKey, limit } = UsageService.identify(userId, null);
+  await UsageService.consume(ownerKey, limit);
   const conversation = conversationId
     ? await conversationService.getOwnedOrThrow(conversationId, userId)
     : await conversationService.createConversation(userId, content);
@@ -112,7 +112,6 @@ const sendUserMessage = async ({ userId, conversationId, content }) => {
   }
 
   const chatHistory = await buildHistory(conversation._id);
-
   const userMessage = await Message.create({
     conversationId: conversation._id,
     role: "user",

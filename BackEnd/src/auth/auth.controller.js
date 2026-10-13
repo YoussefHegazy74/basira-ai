@@ -67,7 +67,18 @@ const verifyEmail = asyncWrapper(async (req, res, next) => {
     message: "Email has been verified successfully.",
   });
 });
-///// verify email
+const logout = asyncWrapper(async (req, res, next) => {
+  await AuthService.logout(req, res);
+  res.status(200).json({ status: HttpStatus.SUCCESS, message: "Logged out" });
+});
+/// deactivate account
+const deactivateAccount = asyncWrapper(async (req, res, next) => {
+  await AuthService.deactivateAccount(req.user._id);
+  res.status(200).json({
+    status: HttpStatus.SUCCESS,
+    message: "Account has been deactivated successfully.",
+  });
+});
 module.exports = {
   register,
   login,
@@ -75,4 +86,6 @@ module.exports = {
   resetPassword,
   changePassword,
   verifyEmail,
+  logout,
+  deactivateAccount,
 };

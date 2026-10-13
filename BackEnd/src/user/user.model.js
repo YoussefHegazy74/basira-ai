@@ -53,6 +53,14 @@ const userSchema = new mongoose.Schema(
       default: null,
       select: false,
     },
+    expiresAt: {
+      type: Date,
+      expires: 0,
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: true,

@@ -78,7 +78,10 @@ const login = async (userData) => {
     throw new AppError(401, "Incorrect email or password", HttpStatus.FAIL);
   }
   const token = signToken(user._id);
+  user.isActive = true;
+  user.expiresAt = undefined;
   user.password = undefined;
+  await user.save();
   return { token };
 };
 const forgotPassword = async (req, res) => {
@@ -234,6 +237,8 @@ const resetPassword = async (token, newPassword, newPasswordConfirm) => {
   user.resetPasswordToken = undefined;
   user.resetPasswordTokenExpiresAt = undefined;
   user.passwordChangedAt = Date.now() - 1000;
+  user.isActive = true;
+  user.expiresAt = undefined;
   await user.save();
 };
 /// change password
@@ -310,6 +315,25 @@ const logout = async (req, res) => {
     sameSite: "lax",
     secure: true,
   });
+  return;
+};
+///// deactivate account
+const deactivateAccount = async (userId) => {
+  const user = await User.findById(userId);
+
+  if (!user) {
+    throw new AppError(404, "User not found", HttpStatus.FAIL);
+  }
+
+  if (!user.isActive) {
+    throw new AppError(400, "Account is already deactivated", HttpStatus.FAIL);
+  }
+
+  user.isActive = false;
+  user.expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+
+  await user.save();
+  return;
 };
 module.exports = {
   register,
@@ -319,4 +343,5 @@ module.exports = {
   changePassword,
   verifyEmail,
   logout,
+  deactivateAccount,
 };

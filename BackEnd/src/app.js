@@ -15,7 +15,9 @@ const authRoutes = require("./auth/auth.routes.js");
 const conversationRoutes = require("./conversation/conversation.routes.js");
 const messageRoutes = require("./message/message.routes.js");
 const usageRoutes = require("./usage/usage.routes.js");
-
+const tafsirRoutes = require("./tafsir/tafsir.routes.js");
+const verifyRoutes = require("./verify/verify.routes.js");
+const userRoutes = require("./user/user.routes.js");
 // ===== Utils =====
 const HttpStatusText = require("./utils/HttpStatusText.js");
 
@@ -55,7 +57,9 @@ app.use("/auth", authRoutes);
 app.use("/conversations", conversationRoutes);
 app.use("/messages", messageRoutes);
 app.use("/usage", usageRoutes);
-
+app.use("/tafsir", tafsirRoutes);
+app.use("/verify", verifyRoutes);
+app.use("/users", userRoutes);
 // ===== 404 Handler =====
 app.use((req, res, next) => {
   return res.status(404).json({

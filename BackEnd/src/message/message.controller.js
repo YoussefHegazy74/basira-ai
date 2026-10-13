@@ -21,7 +21,7 @@ const sendMessage = asyncWrapper(async (req, res, next) => {
     userId: req.user?._id,
     conversationId: req.body.conversationId,
     content: req.body.content,
-    chatHistory: req.body.chatHistory,
+    chat_history: req.body.chat_history ?? req.body.chatHistory,
     guestKey,
   });
 
