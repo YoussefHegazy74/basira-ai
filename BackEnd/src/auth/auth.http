@@ -1,0 +1,73 @@
+@baseUrl = http://localhost:3000
+@token = YOUR_JWT_TOKEN
+@email = user@example.com
+
+# Auth: cookie OR Bearer - server checks Cookie first, then Bearer
+# Use either: Cookie: token={{token}} OR Authorization: Bearer {{token}}
+
+### Register
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "firstName": "Ahmed",
+  "lastName": "Test",
+  "email": "{{email}}",
+  "password": "Passw0rd!",
+  "passwordconfirm": "Passw0rd!"
+}
+
+### Login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "Passw0rd!"
+}
+
+### Forgot Password
+POST {{baseUrl}}/auth/forgotpassword
+Content-Type: application/json
+
+{
+  "email": "{{email}}"
+}
+
+### Reset Password
+PATCH {{baseUrl}}/auth/resetpassword/:token
+Content-Type: application/json
+
+{
+  "newPassword": "NewPassw0rd!",
+  "newPasswordConfirm": "NewPassw0rd!"
+}
+
+### Change Password (auth required - cookie OR Bearer)
+PATCH {{baseUrl}}/auth/changepassword
+Content-Type: application/json
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+{
+  "currentPassword": "Passw0rd!",
+  "newPassword": "NewPassw0rd!"
+}
+
+### Verify Email
+POST {{baseUrl}}/auth/verifyemail
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "verificationToken": "00000000"
+}
+### Logout (auth required)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+### Deactivate Account (auth required)
+PATCH {{baseUrl}}/auth/deactivate-account
+Content-Type: application/json
+Authorization: Bearer {{token}}

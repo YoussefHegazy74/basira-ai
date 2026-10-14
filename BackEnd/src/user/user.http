@@ -1,0 +1,32 @@
+@baseUrl = http://localhost:3000
+@adminToken = YOUR_ADMIN_JWT_TOKEN
+@userId = YOUR_USER_ID
+
+# Auth: cookie OR Bearer - server checks Cookie first, then Bearer
+# Use either: Cookie: token={{adminToken}} OR Authorization: Bearer {{adminToken}}
+
+### Get All Users (auth + admin - cookie OR Bearer)
+GET {{baseUrl}}/users
+Cookie: token={{adminToken}}
+Authorization: Bearer {{adminToken}}
+
+### Get User By Id (auth + admin - cookie OR Bearer)
+GET {{baseUrl}}/users/{{userId}}
+Cookie: token={{adminToken}}
+Authorization: Bearer {{adminToken}}
+
+### Update User By Id (auth + admin - cookie OR Bearer)
+PATCH {{baseUrl}}/users/{{userId}}
+Content-Type: application/json
+Cookie: token={{adminToken}}
+Authorization: Bearer {{adminToken}}
+
+{
+  "firstName": "Updated",
+  "lastName": "Name"
+}
+
+### Delete User (auth + admin - cookie OR Bearer)
+DELETE {{baseUrl}}/users/{{userId}}
+Cookie: token={{adminToken}}
+Authorization: Bearer {{adminToken}}

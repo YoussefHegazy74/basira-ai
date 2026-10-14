@@ -81,7 +81,7 @@ const login = async (userData) => {
   user.isActive = true;
   user.expiresAt = undefined;
   user.password = undefined;
-  await user.save();
+  await user.save({ validateBeforeSave: false });
   return { token };
 };
 const forgotPassword = async (req, res) => {

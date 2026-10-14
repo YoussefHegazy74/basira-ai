@@ -8,4 +8,6 @@ router.post("/forgotpassword", authController.forgotPassword);
 router.patch("/resetpassword/:token", authController.resetPassword);
 router.patch("/changepassword", protect, authController.changePassword);
 router.post("/verifyemail", authController.verifyEmail);
+router.post("/logout", protect, authController.logout);
+router.patch("/deactivate-account", protect, authController.deactivateAccount);
 module.exports = router;

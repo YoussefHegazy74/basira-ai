@@ -1,0 +1,41 @@
+@baseUrl = http://localhost:3000
+@token = YOUR_JWT_TOKEN
+@conversationId = YOUR_CONVERSATION_ID
+
+# Auth: cookie OR Bearer - server checks Cookie first, then Bearer
+# Use either: Cookie: token={{token}} OR Authorization: Bearer {{token}}
+
+### Create Conversation (auth required - cookie OR Bearer)
+POST {{baseUrl}}/conversations
+Content-Type: application/json
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+{
+  "message": "Hello, new chat"
+}
+
+### Get User Conversations (auth required - cookie OR Bearer)
+GET {{baseUrl}}/conversations?page=1&limit=10
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+### Get Conversation By Id (auth required - cookie OR Bearer)
+GET {{baseUrl}}/conversations/{{conversationId}}
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+### Rename Conversation (auth required - cookie OR Bearer)
+PUT {{baseUrl}}/conversations/{{conversationId}}
+Content-Type: application/json
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+{
+  "newTitle": "New title"
+}
+
+### Delete Conversation (auth required - cookie OR Bearer)
+DELETE {{baseUrl}}/conversations/{{conversationId}}
+Cookie: token={{token}}
+Authorization: Bearer {{token}}

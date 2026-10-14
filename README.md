@@ -18,6 +18,7 @@
 ## 🎯 Overview
 
 Basira helps users:
+
 - ✅ Verify Quranic verses and Hadiths against trusted sources
 - ✂️ Detect truncated or out-of-context religious texts
 - 📖 Provide correct interpretations from authenticated Islamic references
@@ -46,11 +47,11 @@ basira-ai/
 
 ## 🗄️ Knowledge Base
 
-| Source | Format | Size | Status |
-|---|---|---|---|
-| Quran (Uthmani) | JSON | — | ✅ Collected |
-| Hadith — 9 Books | JSON | ~60 MB | ✅ Collected |
-| Tafsir Ibn Kathir (10 vols) | PDF | ~518 MB | ✅ Collected |
+| Source                      | Format | Size    | Status       |
+| --------------------------- | ------ | ------- | ------------ |
+| Quran (Uthmani)             | JSON   | —       | ✅ Collected |
+| Hadith — 9 Books            | JSON   | ~60 MB  | ✅ Collected |
+| Tafsir Ibn Kathir (10 vols) | PDF    | ~518 MB | ✅ Collected |
 
 > ⚠️ Raw data is stored on Google Drive (too large for GitHub).
 > 📁 [Tafsir Ibn Kathir PDFs — Google Drive](https://drive.google.com/drive/folders/1bfVkbQJrCVrQTZ21M5iQEPWuXrzBna_x?usp=sharing)
@@ -59,15 +60,15 @@ basira-ai/
 
 ## ⚙️ Tech Stack
 
-| Layer | Technology |
-|---|---|
-| NLP | CAMeL Tools, NLTK, PyArabic |
-| Embeddings | Sentence Transformers |
-| Vector DB | FAISS / Chroma |
-| RAG | LangChain + LLM |
-| Backend | FastAPI |
-| Frontend | React |
-| Security | Penetration Testing + SOC Monitoring |
+| Layer      | Technology                           |
+| ---------- | ------------------------------------ |
+| NLP        | CAMeL Tools, NLTK, PyArabic          |
+| Embeddings | Sentence Transformers                |
+| Vector DB  | FAISS / Chroma                       |
+| RAG        | LangChain + LLM                      |
+| Backend    | FastAPI                              |
+| Frontend   | React                                |
+| Security   | Penetration Testing + SOC Monitoring |
 
 ---
 
@@ -100,9 +101,9 @@ Raw Data (Quran + Hadith + Tafsir)
 - [x] Data collection (Quran, Hadith, Tafsir)
 - [x] UI/UX design
 - [x] Data pipeline & NLP preprocessing
-- [ ] Embeddings & Vector DB
-- [ ] RAG system
-- [ ] Backend (FastAPI)
+- [x] Embeddings & Vector DB
+- [x] RAG system
+- [x] Backend (FastAPI & Node.js)
 - [ ] Frontend (React)
 - [ ] Cybersecurity layer
 
@@ -110,15 +111,16 @@ Raw Data (Quran + Hadith + Tafsir)
 
 ## 👥 Team
 
-| Role | Responsibility |
-|---|---|
-| AI Engineer | NLP · Embeddings · Vector DB · RAG · Chatbot |
-| Data Engineer | Data collection · Pipeline · Schema |
-| Backend Engineer | FastAPI · APIs |
-| Frontend Engineer | React · UI |
-| Security Engineer | Penetration Testing · SOC |
+| Role              | Responsibility                               |
+| ----------------- | -------------------------------------------- |
+| AI Engineer       | NLP · Embeddings · Vector DB · RAG · Chatbot |
+| Data Engineer     | Data collection · Pipeline · Schema          |
+| Backend Engineer  | FastAPI · APIs & Node.js                     |
+| Frontend Engineer | React · UI                                   |
+| Security Engineer | Penetration Testing · SOC                    |
 
 ---
 
 ## 🏫 Faculty of Electronic Engineering — Menoufia University
+
 > Graduation Project — Computer Science Engineering Department

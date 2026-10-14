@@ -1,0 +1,24 @@
+@baseUrl = http://localhost:3000
+@token = YOUR_JWT_TOKEN
+@adminToken = YOUR_ADMIN_JWT_TOKEN
+@userId = YOUR_USER_ID
+
+# Auth: cookie OR Bearer - server checks Cookie first, then Bearer
+# Use either: Cookie: token={{token}} OR Authorization: Bearer {{token}}
+
+### Get My Usage (auth required - cookie OR Bearer)
+GET {{baseUrl}}/usage
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+### Reset Usage For User (auth + admin - cookie OR Bearer)
+POST {{baseUrl}}/usage/reset/{{userId}}
+Content-Type: application/json
+Cookie: token={{adminToken}}
+Authorization: Bearer {{adminToken}}
+
+### Reset All Usage (auth + admin - cookie OR Bearer)
+POST {{baseUrl}}/usage/reset-all
+Content-Type: application/json
+Cookie: token={{adminToken}}
+Authorization: Bearer {{adminToken}}

@@ -1,0 +1,42 @@
+@baseUrl = http://localhost:3000
+@token = YOUR_JWT_TOKEN
+@conversationId = YOUR_CONVERSATION_ID
+@messageId = YOUR_MESSAGE_ID
+
+# Auth: cookie OR Bearer - server checks Cookie first, then Bearer
+# Use either: Cookie: token={{token}} OR Authorization: Bearer {{token}}
+
+### Send Message - Logged User (optionalAuth - cookie OR Bearer)
+POST {{baseUrl}}/messages
+Content-Type: application/json
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+{
+  "conversationId": "{{conversationId}}",
+  "content": "What is the meaning of Ayat Al-Kursi?"
+}
+
+### Send Message - New Conversation (optionalAuth - cookie OR Bearer)
+POST {{baseUrl}}/messages
+Content-Type: application/json
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
+
+{
+  "content": "Hello, start new chat"
+}
+
+### Send Message - Guest (no token, uses guestKey cookie)
+POST {{baseUrl}}/messages
+Content-Type: application/json
+
+{
+  "content": "What is Islam?",
+  "chat_history": []
+}
+
+### Delete Message (cookie OR Bearer)
+DELETE {{baseUrl}}/messages/{{messageId}}
+Cookie: token={{token}}
+Authorization: Bearer {{token}}
