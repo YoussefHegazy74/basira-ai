@@ -1,31 +1,31 @@
 {
-  "name": "basira-backend",
-  "version": "0.0.0",
-  "private": true,
-  "description": "Basira AI backend: auth, conversations, chat/tafsir/verify services that call the Python RAG API.",
-  "main": "src/server.js",
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
   "scripts": {
-    "start": "node src/server.js",
-    "dev": "node --watch src/server.js"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon src/server.js"
   },
-  "engines": {
-    "node": ">=18"
-  },
-  "_dependencyNote": "EXACT versions pinned at integration time (2026-10-17) from a clean npm install; these are NOT the original project versions (no manifest/lockfile existed in the repository). package-lock.json mirrors these pins. Re-review before production/deploy.",
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
   "dependencies": {
-    "bcrypt": "6.0.0",
-    "cookie-parser": "1.4.7",
-    "cors": "2.8.6",
-    "dotenv": "18.0.8",
-    "express": "5.3.0",
-    "express-mongo-sanitize": "2.2.0",
-    "express-rate-limit": "8.7.1",
-    "helmet": "8.3.0",
-    "jsonwebtoken": "9.0.3",
-    "mongoose": "9.11.2",
-    "morgan": "1.12.1",
-    "nodemailer": "10.1.2",
-    "validator": "13.15.35",
-    "xss-clean": "0.1.4"
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.6",
+    "express": "^5.2.1",
+    "express-mongo-sanitize": "^2.2.0",
+    "express-rate-limit": "^8.7.1",
+    "helmet": "^8.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.11.1",
+    "morgan": "^1.12.1",
+    "ndb": "^1.1.5",
+    "nodemailer": "^10.0.16",
+    "nodemon": "^3.1.14",
+    "validator": "^13.15.35",
+    "xss-clean": "^0.1.4"
   }
 }
