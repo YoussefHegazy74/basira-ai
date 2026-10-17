@@ -10,8 +10,10 @@ Replaces: verify.py, detect_truncation.py
 
 from __future__ import annotations
 
+import difflib
 import json
 import pickle
+import re
 import sys
 from pathlib import Path
 
@@ -24,11 +26,92 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from src.embeddings.embedder import get_client, embed_text
 from src.vector_db.faiss_store import search
-from src.nlp.preprocessor import preprocess
+from src.nlp.preprocessor import preprocess, normalize
 
 # Default paths for the FAISS index and chunks
 INDEX_PATH = Path("data/processed/faiss.index")
 CHUNKS_PATH = Path("data/processed/chunks.pkl")
+
+# Deterministic truncation-check thresholds
+INPUT_MATCH_MIN = 0.8
+MATN_COVERAGE_MAX = 0.7
+
+# ---------------------------------------------------------------------------
+# Matn cleaning helpers (Task A)
+# ---------------------------------------------------------------------------
+
+# Unicode format / bidirectional / quote characters that appear in hadith matn
+# but carry no semantic content (U+200E, U+200F, ZWS, ZWNJ, ZWJ, BOM, etc.)
+_FORMAT_CHARS_RE = re.compile(
+    r'[\u200e\u200f\u200b\u200c\u200d\ufeff'
+    r'\u202a-\u202e\u2066-\u2069\u061c'
+    r'\u0640'            # Arabic tatweel
+    r'"\u0022\'\u0027'
+    r'\u00ab\u00bb'      # «»
+    r'\u201c\u201d'      # “”
+    r'\u2018\u2019'      # ‘’
+    r']'
+)
+
+# Narration-framing patterns that may appear as a *leading* prefix in matn.
+# Each entry is a list of normalised word tokens (longest first so we match
+# the most specific pattern before falling back to shorter ones).
+_FRAMING_PATTERNS: list[list[str]] = sorted(
+    [
+        normalize(p).split()
+        for p in [
+            "قال رسول الله صلى الله عليه وسلم قال",
+            "قال رسول الله صلى الله عليه وسلم",
+            "سمعت رسول الله صلى الله عليه وسلم يقول",
+            "سمعت رسول الله صلى الله عليه وسلم",
+            "ان رسول الله صلى الله عليه وسلم قال",
+            "ان رسول الله صلى الله عليه وسلم",
+            "عن رسول الله صلى الله عليه وسلم",
+            "قال النبي صلى الله عليه وسلم",
+            "ان النبي صلى الله عليه وسلم",
+            "عن النبي صلى الله عليه وسلم",
+            "رسول الله صلى الله عليه وسلم",
+            "النبي صلى الله عليه وسلم",
+            "صلى الله عليه وسلم",
+            "يقول",
+            "قال",
+        ]
+    ],
+    key=len,
+    reverse=True,  # longest first
+)
+
+
+def _strip_format_chars(text: str) -> str:
+    """Remove format/bidi/quote characters that add no semantic content."""
+    return _FORMAT_CHARS_RE.sub(' ', text)
+
+
+def _clean_matn_words(matn_raw: str, strip_framing: bool = True) -> list[str]:
+    """Return normalised word tokens for *matn_raw*.
+
+    Steps:
+    1. Remove U+200F/200E and other format chars.
+    2. Normalize (strip tashkeel, unify hamza/alef, etc.).
+    3. Optionally strip a *leading* narration-framing prefix (repeated
+       until no more patterns match from the front).  Words in the
+       *middle* of the matn are never removed.
+    """
+    cleaned = _strip_format_chars(matn_raw)
+    words = normalize(cleaned).split()
+
+    if strip_framing:
+        changed = True
+        while changed and words:
+            changed = False
+            for pat in _FRAMING_PATTERNS:
+                n = len(pat)
+                if n and words[:n] == pat:
+                    words = words[n:]
+                    changed = True
+                    break
+
+    return words
 
 SYSTEM_PROMPT = (
     "أنت عالم إسلامي متخصص في التحقق من النصوص الدينية.\n"
@@ -218,21 +301,35 @@ def verify_full(
     if index is None or chunks is None:
         index, chunks = load_faiss_index()
 
-    # --- Step 1: Dual-embedding search on text ---
-    results = _dual_search(text, client, index, chunks, top_k, debug=debug)
+    # --- Step 1: Wide dual-embedding search on text ---
+    wide_k = top_k * 20
+    wide_results = _dual_search(text, client, index, chunks, wide_k, debug=debug)
+
+    # Take the top_k overall, then also ensure the top 3 hadith chunks
+    # are included (they may be buried deeper in the ranking).
+    results = wide_results[:top_k]
+    seen_ids = {r.get("id") for r in results}
+
+    hadith_extras = [
+        r for r in wide_results
+        if r.get("source") == "hadith" and r.get("id") not in seen_ids
+    ][:3]
+    for r in hadith_extras:
+        results.append(r)
+        seen_ids.add(r.get("id"))
 
     # --- Step 2: If explanation provided, search on it too & merge ---
     if explanation:
-        expl_results = _dual_search(explanation, client, index, chunks, top_k, debug=debug)
+        expl_results = _dual_search(
+            explanation, client, index, chunks, wide_k, debug=debug,
+        )
 
-        # Merge, deduplicate by chunk id
-        seen_ids = {r.get("id") for r in results}
         for r in expl_results:
             if r.get("id") not in seen_ids:
                 results.append(r)
                 seen_ids.add(r.get("id"))
 
-    # --- Step 3: Build context and call GPT-4o-mini ---
+    # --- Step 3: Build context ---
     sources_text = "\n\n".join(
         f"[مصدر {i + 1}] (تطابق: {r['score']:.2f})\n"
         f"النص: {r['original_text']}\n"
@@ -241,22 +338,104 @@ def verify_full(
         for i, r in enumerate(results)
     )
 
+    # --- Step 3a: Deterministic truncation check (before GPT call) ---
+    # Find the highest-scoring hadith chunk that has metadata["matn"]
+    computed_is_truncated = None   # None = don't override
+    computed_missing_part = None
+    computed_full_text = None
+
+    best_matn_chunk = None
+    for r in results:
+        if r.get("source") != "hadith":
+            continue
+        chunk_id = r.get("id")
+        for c in chunks:
+            if c.get("id") == chunk_id:
+                meta = c.get("metadata", {})
+                if isinstance(meta, dict) and meta.get("matn", "").strip():
+                    best_matn_chunk = c
+                    break
+        if best_matn_chunk is not None:
+            break
+
+    if best_matn_chunk is not None:
+        matn_raw = best_matn_chunk["metadata"]["matn"]
+
+        # Clean input: strip format chars, then normalize
+        input_clean = _strip_format_chars(text)
+        input_norm_words = normalize(input_clean).split()
+
+        # Clean matn: strip format chars + leading framing prefix, then normalize
+        matn_norm_words = _clean_matn_words(matn_raw, strip_framing=True)
+
+        if input_norm_words and matn_norm_words:
+            sm = difflib.SequenceMatcher(
+                None, input_norm_words, matn_norm_words,
+            )
+            matching_blocks = sm.get_matching_blocks()
+            matched = sum(block.size for block in matching_blocks)
+
+            input_match = matched / len(input_norm_words)
+            matn_coverage = matched / len(matn_norm_words)
+
+            if debug:
+                print(
+                    f"\n[DEBUG] Truncation check: "
+                    f"input_match={input_match:.4f}, "
+                    f"matn_coverage={matn_coverage:.4f}"
+                )
+
+            if input_match >= INPUT_MATCH_MIN:
+                if matn_coverage < MATN_COVERAGE_MAX:
+                    matched_matn_indices: set[int] = set()
+                    for block in matching_blocks:
+                        for offset in range(block.size):
+                            matched_matn_indices.add(block.b + offset)
+                    missing_words = [
+                        w for idx, w in enumerate(matn_norm_words)
+                        if idx not in matched_matn_indices
+                    ]
+                    # Fewer than 2 real words missing → not truncated
+                    if len(missing_words) < 2:
+                        computed_is_truncated = False
+                    else:
+                        computed_is_truncated = True
+                        computed_missing_part = " ".join(missing_words)
+                        computed_full_text = matn_raw
+                else:
+                    computed_is_truncated = False
+
+    # --- Step 3b: Build user message ---
     user_parts = [f"النص المدخل: {text}"]
     if explanation:
         user_parts.append(f"الشرح المقدم: {explanation}")
+
+    # Inject computed truncation facts so GPT's explanation stays consistent
+    if computed_is_truncated is True:
+        user_parts.append(
+            f"ملاحظة: تحليل آلي يُظهر أن النص مبتور. "
+            f"النص الكامل من المصدر: {computed_full_text}\n"
+            f"الجزء الناقص: {computed_missing_part}"
+        )
+    elif computed_is_truncated is False:
+        user_parts.append(
+            "ملاحظة: تحليل آلي يُظهر أن النص مكتمل وغير مبتور."
+        )
+
     user_parts.append(f"\nالمصادر المسترجعة:\n{sources_text}")
     user_message = "\n\n".join(user_parts)
 
     if debug:
         print(f"\n[DEBUG] User message length: {len(user_message)} chars")
 
+    # --- Step 3c: Call GPT-4o-mini ---
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
-        temperature=0.0,
+        temperature=0,
         response_format={"type": "json_object"},
     )
 
@@ -275,11 +454,38 @@ def verify_full(
         print(f"[DEBUG] Parsed keys: {list(answer.keys())}")
 
     # --- Step 5: Build result dict with Arabic fallbacks ---
-    is_truncated_val = get_key(
+    gpt_is_truncated = get_key(
         answer,
         "is_truncated", "هل النص مبتور أو منقوص", "هل النص مبتور", "مبتور",
         "اكتمال النص", "اكتمال_النص",
         default="لا",
+    )
+    gpt_missing_part = get_key(
+        answer,
+        "missing_part", "الجزء الناقص", "الجزء_الناقص",
+        "الجزء الناقص من النص",
+    )
+    gpt_full_text = get_key(
+        answer,
+        "full_text", "النص الكامل", "النص_الكامل",
+        "النص الكامل من المصدر",
+    )
+
+    # Apply deterministic overrides when the computed check was decisive
+    final_is_truncated = (
+        computed_is_truncated
+        if computed_is_truncated is not None
+        else _is_yes(gpt_is_truncated)
+    )
+    final_missing_part = (
+        computed_missing_part
+        if computed_missing_part is not None
+        else gpt_missing_part
+    )
+    final_full_text = (
+        computed_full_text
+        if computed_full_text is not None
+        else gpt_full_text
     )
 
     return {
@@ -289,17 +495,9 @@ def verify_full(
             "status", "النتيجة",
             default="غير موجود",
         ),
-        "is_truncated": _is_yes(is_truncated_val),
-        "missing_part": get_key(
-            answer,
-            "missing_part", "الجزء الناقص", "الجزء_الناقص",
-            "الجزء الناقص من النص",
-        ),
-        "full_text": get_key(
-            answer,
-            "full_text", "النص الكامل", "النص_الكامل",
-            "النص الكامل من المصدر",
-        ),
+        "is_truncated": final_is_truncated,
+        "missing_part": final_missing_part,
+        "full_text": final_full_text,
         "source": _flatten_source(
             get_key(answer, "source", "المصدر", "مصدر", "المصدر_الموثوق")
         ),
@@ -383,7 +581,7 @@ if __name__ == "__main__":
 
         print(f"\n  صحة النص:          {result['text_status']}")
         print(f"  مبتور:             {'نعم' if result['is_truncated'] else 'لا'}")
-        print(f"  الجزء الناقص:      {result['missing_part']}")
+        print(f"  الجزء الناقص:      {result['missing_part']}")  # full, no truncation
         print(f"  النص الكامل:       {result['full_text']}")
         print(f"  المصدر:            {result['source']}")
         print(f"  درجة الخطورة:      {result['danger_level']}")

@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import pickle
 from pathlib import Path
+from typing import Optional
 
 import faiss
 
@@ -22,18 +23,42 @@ from src.nlp.preprocessor import preprocess
 INDEX_PATH = Path("data/processed/faiss.index")
 CHUNKS_PATH = Path("data/processed/chunks.pkl")
 
+# Minimum cosine-similarity score for a Quran chunk match to be trusted.
+# Real ayahs score ≥ 0.72; fabricated text scores ~0.44.
+_QURAN_SCORE_THRESHOLD = 0.55
+
+# ---------------------------------------------------------------------------
+# Module-level tafsir-map cache (built once per process, keyed by id(chunks))
+# ---------------------------------------------------------------------------
+# Key:   "تفسير ابن كثير {surah}:{ayah}"   (the chunk reference string)
+# Value: the full chunk dict
+_tafsir_map_cache: dict[int, dict[str, dict]] = {}
+
+
+def _get_tafsir_map(chunks: list[dict]) -> dict[str, dict]:
+    """Return (and cache) a {reference -> chunk} dict for tafsir chunks."""
+    cache_key = id(chunks)
+    if cache_key not in _tafsir_map_cache:
+        tmap: dict[str, dict] = {}
+        for c in chunks:
+            if c.get("source") == "tafsir":
+                ref = c.get("reference", "")
+                if ref:
+                    tmap[ref] = c
+        _tafsir_map_cache[cache_key] = tmap
+    return _tafsir_map_cache[cache_key]
+
+
 SYSTEM_PROMPT = (
     "أنت متخصص في تفسير القرآن الكريم. بناءً على مقاطع تفسير ابن كثير المقدمة فقط:\n"
     "1. قدّم تفسير الآية المدخلة بأسلوب واضح وموجز\n"
     "2. اذكر السياق والسبب في النزول إن وُجد في المصادر\n"
-    "3. اذكر المصدر بدقة (رقم السورة والآية)\n"
     "لا تجاوب من معرفتك الخاصة. إذا لم تجد الآية في المصادر، "
     "قل: 'لم أجد تفسير هذه الآية في قاعدة البيانات'.\n"
-    "أجب بالعربية فقط في شكل JSON بهذه المفاتيح:\n"
+    "أجب بالعربية فقط في شكل JSON بهذين المفتاحين فقط:\n"
     "{\n"
     "  'tafsir': 'نص التفسير',\n"
-    "  'context': 'السياق وسبب النزول أو فارغ',\n"
-    "  'source': 'رقم السورة:رقم الآية'\n"
+    "  'context': 'السياق وسبب النزول أو فارغ'\n"
     "}"
 )
 
@@ -99,6 +124,131 @@ def _filter_tafsir(results: list[dict]) -> list[dict]:
     return [r for r in results if r.get("source") == "tafsir"]
 
 
+# ---------------------------------------------------------------------------
+# Public helper: resolve_tafsir_reference
+# ---------------------------------------------------------------------------
+
+def resolve_tafsir_reference(
+    ayah_text: str,
+    index: faiss.IndexFlatIP,
+    chunks: list[dict],
+    client,
+    debug: bool = False,
+) -> tuple[Optional[dict], Optional[dict], str]:
+    """Identify the correct tafsir chunk(s) for *ayah_text* via reference lookup.
+
+    Steps:
+      1. Dual-embedding search over the full index; filter to source=="quran"
+         chunks to identify the ayah's surah and ayah number.
+      2. Build/look up the module-level tafsir-map and retrieve the tafsir
+         chunk whose reference is  "تفسير ابن كثير {surah}:{ayah}".
+         If missing, fall back to the nearest previous ayah of the same surah.
+      3. Also return the *next* tafsir chunk (same surah, ayah+1) for context.
+
+    Returns:
+        (primary_chunk, next_chunk, source_str)
+        primary_chunk: the main tafsir chunk dict (or None if not found).
+        next_chunk:    the immediately following tafsir chunk (or None).
+        source_str:    "{surah}:{ayah}" derived from the chunk reference.
+    """
+    processed = preprocess(ayah_text)
+    emb_norm = embed_text(processed["normalized"], client)
+    emb_orig = embed_text(ayah_text, client)
+
+    # Wide search so we can filter by source=="quran" after the fact
+    wide_k = 200
+    results_norm = search(emb_norm, index, chunks, top_k=wide_k)
+    results_orig = search(emb_orig, index, chunks, top_k=wide_k)
+
+    # Filter to quran source only
+    quran_norm = [r for r in results_norm if r.get("source") == "quran"]
+    quran_orig = [r for r in results_orig if r.get("source") == "quran"]
+
+    best_quran = None
+    if quran_orig and quran_norm:
+        best_quran = (
+            quran_orig[0]
+            if quran_orig[0]["score"] > quran_norm[0]["score"]
+            else quran_norm[0]
+        )
+    elif quran_norm:
+        best_quran = quran_norm[0]
+    elif quran_orig:
+        best_quran = quran_orig[0]
+
+    if debug:
+        if best_quran:
+            print(
+                f"[DEBUG] Best quran match: ref={best_quran.get('reference')!r}  "
+                f"score={best_quran.get('score'):.4f}"
+            )
+        else:
+            print("[DEBUG] No quran chunk found")
+
+    # Guard: score too low → fabricated / unknown ayah
+    if best_quran is None or best_quran["score"] < _QURAN_SCORE_THRESHOLD:
+        return None, None, ""
+
+    # Look up the full chunk to get metadata (search() strips metadata)
+    quran_chunk_full = next(
+        (c for c in chunks if c.get("id") == best_quran["id"]), None
+    )
+    if quran_chunk_full is None:
+        return None, None, ""
+
+    meta = quran_chunk_full.get("metadata") or {}
+    surah_num = meta.get("surah_number")
+    ayah_num = meta.get("ayah_number")
+
+    if surah_num is None or ayah_num is None:
+        return None, None, ""
+
+    if debug:
+        print(f"[DEBUG] Resolved to surah={surah_num}, ayah={ayah_num}")
+
+    # Build / retrieve the tafsir reference map
+    tmap = _get_tafsir_map(chunks)
+
+    # Direct lookup
+    primary_ref = f"تفسير ابن كثير {surah_num}:{ayah_num}"
+    primary = tmap.get(primary_ref)
+
+    # Fallback: nearest previous ayah in the same surah that has a tafsir chunk
+    if primary is None:
+        for prev_ayah in range(ayah_num - 1, 0, -1):
+            candidate_ref = f"تفسير ابن كثير {surah_num}:{prev_ayah}"
+            if candidate_ref in tmap:
+                primary = tmap[candidate_ref]
+                if debug:
+                    print(
+                        f"[DEBUG] Tafsir not found for {primary_ref}; "
+                        f"fell back to {candidate_ref}"
+                    )
+                break
+
+    if primary is None:
+        return None, None, ""
+
+    # Parse source string from the chunk reference (never from GPT)
+    # Reference format: "تفسير ابن كثير {surah}:{ayah}"
+    primary_ref_str = primary.get("reference", "")
+    # Extract "surah:ayah" part after the last space sequence
+    source_str = primary_ref_str.split()[-1] if primary_ref_str else ""
+
+    # Also grab the next chunk for context
+    primary_meta = primary.get("metadata") or {}
+    p_surah = primary_meta.get("surah_number", surah_num)
+    p_ayah = primary_meta.get("ayah_number", ayah_num)
+    next_ref = f"تفسير ابن كثير {p_surah}:{p_ayah + 1}"
+    next_chunk = tmap.get(next_ref)
+
+    return primary, next_chunk, source_str
+
+
+# ---------------------------------------------------------------------------
+# Main retrieval function
+# ---------------------------------------------------------------------------
+
 def get_tafsir(
     ayah_text: str,
     index: faiss.IndexFlatIP,
@@ -110,112 +260,61 @@ def get_tafsir(
     """Retrieve Tafsir Ibn Kathir for a Quranic verse.
 
     Pipeline:
-        1. Preprocess the input ayah (normalize, tokenize, remove stopwords).
-        2. Embed both normalized and raw text using OpenAI embeddings.
-        3. Search FAISS with both embeddings, pick best top-1 score.
-        4. Filter results to keep only tafsir chunks.
-        5. Send the input + retrieved tafsir to GPT-4o-mini for summarisation.
-        6. Return a structured tafsir result.
+        1. Call resolve_tafsir_reference to identify the correct tafsir chunk
+           by matching the ayah to the Quran index and looking up by reference.
+        2. Send only that chunk (plus the next one) to GPT-4o-mini.
+        3. Compute 'source' from the chunk reference — never from GPT output.
+        4. Return a structured tafsir result.
 
     Args:
         ayah_text: The Quranic verse text to look up.
         index:     A loaded FAISS index.
         chunks:    The chunk dicts aligned with the index.
         client:    An authenticated OpenAI client.
-        top_k:     Number of FAISS results to retrieve.
+        top_k:     (unused — kept for interface compatibility)
         debug:     If True, print raw GPT response and top FAISS hits.
 
     Returns:
         Dict with keys: tafsir, context, source, input_ayah.
     """
-    # 1. Preprocess
-    processed = preprocess(ayah_text)
-    normalized_text = processed["normalized"]
+    primary, next_chunk, source_str = resolve_tafsir_reference(
+        ayah_text, index, chunks, client, debug=debug
+    )
 
-    # 2. Embed both normalized and original, use the one with higher max score
-    emb_normalized = embed_text(normalized_text, client)
-    emb_original = embed_text(ayah_text, client)
+    # Nothing found
+    if primary is None:
+        return {
+            "tafsir": "لم أجد تفسير هذه الآية في قاعدة البيانات.",
+            "context": "",
+            "source": "",
+            "input_ayah": ayah_text,
+        }
 
-    # 3. Search FAISS with both embeddings
-    results_norm = search(emb_normalized, index, chunks, top_k=top_k)
-    results_orig = search(emb_original, index, chunks, top_k=top_k)
-
-    # Pick whichever set has the higher top-1 score
-    if results_orig and results_norm:
-        results = (
-            results_orig
-            if results_orig[0]["score"] > results_norm[0]["score"]
-            else results_norm
-        )
-    else:
-        results = results_norm or results_orig
-
-    # 4. Filter to tafsir chunks only
-    tafsir_results = _filter_tafsir(results)
-
-    # If no tafsir chunks in initial results, progressively widen the search
-    for multiplier in (20, 50):
-        if tafsir_results:
-            break
-        wide_k = top_k * multiplier
-        if debug:
-            print(
-                f"[DEBUG] No tafsir chunks found yet, "
-                f"widening to top {wide_k}…"
-            )
-        results_norm_wide = search(emb_normalized, index, chunks, top_k=wide_k)
-        results_orig_wide = search(emb_original, index, chunks, top_k=wide_k)
-
-        if results_orig_wide and results_norm_wide:
-            results_wide = (
-                results_orig_wide
-                if results_orig_wide[0]["score"] > results_norm_wide[0]["score"]
-                else results_norm_wide
-            )
-        else:
-            results_wide = results_norm_wide or results_orig_wide
-
-        tafsir_results = _filter_tafsir(results_wide)
-
-    # Debug: show top FAISS tafsir hits
-    if debug:
-        print(f"\n[DEBUG] Top FAISS tafsir results ({len(tafsir_results)} found):")
-        for i, r in enumerate(tafsir_results[:3]):
-            print(
-                f"  {i + 1}. score={r['score']:.4f}  "
-                f"ref={r.get('reference', 'N/A')}  "
-                f"text={r.get('original_text', '')[:80]}…"
-            )
-
-    # 5. Build context from retrieved tafsir sources
-    if tafsir_results:
-        sources_text = "\n\n".join(
-            f"[مصدر {i + 1}] (تطابق: {r['score']:.2f})\n"
-            f"النص: {r['original_text']}\n"
-            f"المصدر: {r['source']}\n"
-            f"المرجع: {r['reference']}"
-            for i, r in enumerate(tafsir_results)
-        )
-    else:
-        sources_text = "لا توجد مصادر تفسير متاحة لهذه الآية."
+    # Build context from only the primary (+ next) chunk(s)
+    context_chunks = [primary] + ([next_chunk] if next_chunk else [])
+    sources_text = "\n\n".join(
+        f"[مصدر {i + 1}]\n"
+        f"النص: {c.get('original_text', '')}\n"
+        f"المرجع: {c.get('reference', '')}"
+        for i, c in enumerate(context_chunks)
+    )
 
     user_message = (
         f"الآية المدخلة: {ayah_text}\n\n"
         f"مقاطع التفسير المسترجعة:\n{sources_text}"
     )
 
-    # 6. Call GPT-4o-mini
+    # Call GPT-4o-mini with temperature=0 for determinism
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_message},
         ],
-        temperature=0.0,
+        temperature=0,
         response_format={"type": "json_object"},
     )
 
-    # 7. Parse the JSON response
     raw_answer = response.choices[0].message.content
 
     if debug:
@@ -227,7 +326,6 @@ def get_tafsir(
         answer = {
             "tafsir": "لم أجد تفسير هذه الآية في قاعدة البيانات",
             "context": "",
-            "source": "",
         }
 
     if debug:
@@ -244,9 +342,8 @@ def get_tafsir(
             "context", "السياق", "سبب_النزول", "السياق_وسبب_النزول",
             "السياق وسبب النزول",
         ),
-        "source": _flatten_source(
-            get_key(answer, "source", "المصدر", "مصدر", "المصدر_الموثوق", default="")
-        ),
+        # Source is always computed from the chunk reference — never from GPT
+        "source": source_str,
         "input_ayah": ayah_text,
     }
 
@@ -256,26 +353,24 @@ if __name__ == "__main__":
     client = get_client()
     index, chunks = load_faiss_index()
 
-    # --- Diagnostic: check source distribution in chunks ---
-    print("=== DIAGNOSTIC ===")
-    sources = {}
-    for c in chunks:
-        s = c.get("source", "unknown")
-        sources[s] = sources.get(s, 0) + 1
-    print("Source distribution:", sources)
-
-    tafsir_chunks = [c for c in chunks if c.get("source") == "tafsir"]
-    print(f"Total tafsir chunks: {len(tafsir_chunks)}")
-    if tafsir_chunks:
-        print("Sample tafsir chunk keys:", list(tafsir_chunks[0].keys()))
-        print("Sample tafsir clean_text:", tafsir_chunks[0].get("clean_text", "")[:100])
-        print("Sample tafsir reference:", tafsir_chunks[0].get("reference", ""))
+    # --- Diagnostic: print one quran chunk and one tafsir chunk ---
+    print("=== DIAGNOSTIC: chunk field names ===")
+    quran_sample = next(c for c in chunks if c.get("source") == "quran")
+    tafsir_sample = next(c for c in chunks if c.get("source") == "tafsir")
+    print("Quran chunk keys:  ", list(quran_sample.keys()))
+    print("Quran metadata:    ", quran_sample.get("metadata"))
+    print("Tafsir chunk keys: ", list(tafsir_sample.keys()))
+    print("Tafsir metadata:   ", tafsir_sample.get("metadata"))
     print("==================")
 
     # --- Test cases ---
     test_inputs = [
         "بسم الله الرحمن الرحيم",
         "الحمد لله رب العالمين",
+        "إياك نعبد وإياك نستعين",
+        "قل هو الله أحد",
+        "اهدنا الصراط المستقيم",
+        "آية غير موجودة إطلاقاً اختبار فقط",
     ]
 
     for ayah in test_inputs:
@@ -285,8 +380,8 @@ if __name__ == "__main__":
 
         result = get_tafsir(ayah, index, chunks, client, debug=True)
 
-        print(f"التفسير:       {result['tafsir']}")
-        print(f"السياق:        {result['context']}")
+        print(f"التفسير:       {result['tafsir'][:120]}{'…' if len(result.get('tafsir','')) > 120 else ''}")
+        print(f"السياق:        {result['context'][:80] if result.get('context') else ''}")
         print(f"المصدر:        {result['source']}")
         print(f"الآية المدخلة: {result['input_ayah']}")
         print("=" * 60)

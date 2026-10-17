@@ -1,5 +1,5 @@
 const Usage = require("./usage.model");
-const AppError = require("../utils/appError.js");
+const AppError = require("../utils/AppError.js");
 const HttpStatus = require("../utils/HttpStatusText.js");
 
 const Guest_Usage_limit = 5;

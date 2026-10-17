@@ -1,0 +1,8 @@
+# Runtime dependencies of model_api.py.
+# Versions are intentionally unpinned: the original deployment versions were
+# not recorded in the repository. Pin exact versions before deploying.
+fastapi
+uvicorn
+openai
+faiss-cpu
+python-dotenv
