@@ -43,6 +43,11 @@ pin down the mechanics that the eval harness measures statistically:
     negation elsewhere in the chunk not poisoning other tokens.
   * RRF determinism: exactly-tied fused scores keep insertion order (no
     PYTHONHASHSEED-dependent tie order / pool_rank jitter).
+  * Curated grounding alias (Phase E.4): the single audited pair
+    نزول -> نزلت is admitted for the rare-token family exemption only —
+    exact folded match, no bare-stem/reverse/suffix expansion, no effect
+    on quote verification or the entity guard, and the Phase E.3 collision
+    falsifiers (صوام/صامت، راوي/رايت، ثواب/ثابت، تورك/تركت) stay dropped.
 
 Usage:
     PYTHONDONTWRITEBYTECODE=1 venv/bin/python src/rag/offline_tests.py
@@ -52,6 +57,8 @@ Exit code 0 when all tests pass, 1 otherwise.
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import sys
 from types import SimpleNamespace
@@ -957,20 +964,30 @@ def test_p5v5_grounding_policy() -> None:
     check("token before negation is not flip-marked (right-only)",
           "الآية" in out)
 
-    # neg-window-fp residual: the documented false rejection of the frozen
-    # set.  نزول is unmatched with union df 238 <= 300 (rare), so the
-    # sentence stays dropped — pinned here so any threshold drift shows up.
+    # neg-window-fp residual: the frozen-set sentence whose نزول is only
+    # supported as نزلت in the cited chunk.  On this micro-corpus the
+    # sentence still drops because كان/يرى/بعد are df-0 rare there, but the
+    # Phase E.4 curated alias must remove نزول itself from the blocker list
+    # (نزلت is present in the cited source).  Pinned so any alias or
+    # threshold drift shows up here.
     src_nw = _chunk(
         "p5_nw", "hadith",
         "عن ابن عباس قال لما نزلت هذه الآية ولا تقربوا مال اليتيم إلا "
         "بالتي هي أحسن قال اجتنب الناس مال اليتيم وطعامه")
     corpus_nw = [src_nw] + [_chunk(f"p5_nwi{i}", "fiqh", "نزول فقه")
                             for i in range(238)]
-    out = P._ground_answer(
-        "كان ابن عباس يرى اجتناب مال اليتيم بعد نزول الآية (مصدر 1).",
-        [src_nw], corpus_nw)
-    check("neg-window-fp residual fixture still dropped (documented FR)",
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        out = P._ground_answer(
+            "كان ابن عباس يرى اجتناب مال اليتيم بعد نزول الآية (مصدر 1).",
+            [src_nw], corpus_nw)
+    log_nw = next((ln for ln in buf.getvalue().splitlines()
+                   if ln.startswith("[ground]")), "")
+    check("neg-window-fp micro-corpus still dropped (other rare tokens)",
           out.strip() == REFUSAL)
+    check("curated alias removes نزول from the blockers only",
+          "نزول" not in log_nw
+          and all(tok in log_nw for tok in ("كان", "يرى", "بعد")))
 
     # Multi-sentence independence: one dropped sentence never suppresses a
     # supported neighbour in the same answer.
@@ -982,6 +999,136 @@ def test_p5v5_grounding_policy() -> None:
         [by_id["k_badr"], by_id["k_two"]], corpus)
     check("unsupported sentence dropped, supported neighbour kept",
           "الوتر" in out and "الخندق" not in out)
+
+
+# ---------------------------------------------------------------------------
+
+def test_grounding_curated_alias() -> None:
+    print("\n[15] Grounding curated alias (نزول -> نزلت)")
+
+    # The single audited pair: an exact folded table, no stem/prefix/suffix
+    # expansion, and no reverse direction (Phase E.4; evidence in the
+    # Phase E.1 false-rejection analysis and Phase E.3 audit reports).
+    check("curated alias table holds exactly the audited pair",
+          P._GROUNDING_CURATED_ALIASES == {"نزول": ("نزلت",)})
+    check("alias hits select only the exact folded target",
+          P._curated_alias_surfaces("نزول", {"نزلت", "نزل", "الرحمة"})
+          == {"نزلت"})
+    check("alias is not reverse-matching",
+          P._curated_alias_surfaces("نزلت", {"نزول"}) == set())
+    check("other hollow pairs stay unaliased",
+          P._curated_alias_surfaces("دخول", {"دخلت"}) == set())
+
+    # Positive target: نزول is the only unmatched content token and the
+    # cited chunk contains نزلت, so the alias must remove it from the
+    # rare-token blockers and keep the sentence with every guard ok.
+    src_pos = _chunk("p5_alias", "hadith",
+                     "لما نزلت آية الرحمة اجتنب الناس مال اليتيم")
+    claim_pos = "نزول آية الرحمة اجتنب الناس مال اليتيم (مصدر 1)."
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        out = P._ground_answer(claim_pos, [src_pos], [src_pos])
+    log_pos = next((ln for ln in buf.getvalue().splitlines()
+                    if ln.startswith("[ground]")), "")
+    check("curated alias flips the sole-نزول fixture to KEEP",
+          out.strip() != REFUSAL)
+    check("alias exemption leaves every other guard ok",
+          "digits=ok months=ok neg=ok quote=ok entity=ok" in log_pos
+          and "rare=" not in log_pos)
+
+    # Exact-match boundaries: only the exact source surface نزلت activates;
+    # bare نزل, the x+ة form نزلة, the reverse direction and any other
+    # hollow-looking pair must all stay blocked.
+    src_bare = _chunk("p5_alias_bare", "hadith",
+                      "لما نزل آية الرحمة اجتنب الناس مال اليتيم")
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        out = P._ground_answer(claim_pos, [src_bare], [src_bare])
+    log_bare = next((ln for ln in buf.getvalue().splitlines()
+                     if ln.startswith("[ground]")), "")
+    check("bare نزل source does not activate the alias",
+          out.strip() == REFUSAL and "rare=نزول" in log_bare)
+    src_ta = _chunk("p5_alias_ta", "hadith",
+                    "لما نزلة آية الرحمة اجتنب الناس مال اليتيم")
+    out = P._ground_answer(claim_pos, [src_ta], [src_ta])
+    check("x+ة suffix (نزلة) does not activate the alias",
+          out.strip() == REFUSAL)
+    src_rev = _chunk("p5_alias_rev", "hadith",
+                     "لما نزول آية الرحمة اجتنب الناس مال اليتيم")
+    out = P._ground_answer(
+        "نزلت آية الرحمة اجتنب الناس مال اليتيم (مصدر 1).",
+        [src_rev], [src_rev])
+    check("reverse direction is not aliased",
+          out.strip() == REFUSAL)
+    src_dukhul = _chunk("p5_alias_dukhul", "hadith",
+                        "لما دخلت آية الرحمة اجتنب الناس مال اليتيم")
+    out = P._ground_answer(
+        "دخول آية الرحمة اجتنب الناس مال اليتيم (مصدر 1).",
+        [src_dukhul], [src_dukhul])
+    check("other hollow pair (دخول/دخلت) stays unaliased",
+          out.strip() == REFUSAL)
+
+    # Adversarial falsifiers adapted from the Phase E.3 audit: the four
+    # collision cases the generalized predicate false-accepted, plus the
+    # negative controls for unsupported evidence, extra material, negation
+    # polarity, quote verification, the entity guard and broader claims.
+    falsifiers = [
+        ("F2 unsupported hollow (نزول, no نزلت anywhere)",
+         "نزول غزير للمطر (مصدر 1).",
+         "المطر غزير جدا في الشتاء"),
+        ("F2b bare-stem source (ينزل) not bridged",
+         "نزول غزير للمطر (مصدر 1).",
+         "المطر ينزل غزيرا في الشتاء"),
+        ("F3a صوام/صامت (silent) not bridged",
+         "الصوام صامت في المسجد (مصدر 1).",
+         "كان صامت لا يتكلم في المسجد"),
+        ("F3b راوي/رايت not bridged",
+         "الراوي رايت في المسجد (مصدر 1).",
+         "رايت المسجد في المنام"),
+        ("F3c ثواب/ثابت not bridged",
+         "الثواب ثابت في العمل (مصدر 1).",
+         "ثابت العمل بالدليل في المسجد"),
+        ("F3d تورك/تركت not bridged",
+         "التورك تركت المسجد (مصدر 1).",
+         "تركت المسجد في الشتاء"),
+        ("F4 extra unmatched material still dropped",
+         "نزول المطر والصوام (مصدر 1).",
+         "لما نزلت الرحمة على المطر"),
+        ("F5 negated claim without source negation dropped",
+         "لا نزول للمطر في الشتاء (مصدر 1).",
+         "نزلت الرحمة على المطر في الشتاء"),
+        ("F5 quoted span alignment unaffected by alias",
+         "قال «نزول المطر بعد الشتاء» في المسجد (مصدر 1).",
+         "لما نزلت الرحمة على المطر في الشتاء"),
+        ("F5 entity swap still rejected",
+         "قال ابن يعود في المسجد الأقصى (مصدر 1).",
+         "قال في المسجد الأقصى عن الشتاء"),
+        ("F6 broader unsupported passage dropped",
+         "نزول تحريم الخمر سنة سبع (مصدر 1).",
+         "لما نزلت الآية في تحريم مال اليتيم"),
+    ]
+    fals_logs: dict[str, str] = {}
+    for name, claim, src_text in falsifiers:
+        c = _chunk("p5_alias_fal", "hadith", src_text)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            out = P._ground_answer(claim, [c], [c])
+        fals_logs[name] = next(
+            (ln for ln in buf.getvalue().splitlines()
+             if ln.startswith("[ground]")), "")
+        check(name, out.strip() == REFUSAL)
+
+    # The alias must not leak into the other guarded decisions: the quote
+    # span and the entity follower still fail their own checks, and the
+    # negation parity filter still blocks the alias hit.
+    check("quoted-span failure is the quote guard, not a rare token",
+          "quote=fail" in fals_logs[
+              "F5 quoted span alignment unaffected by alias"])
+    check("entity failure is the entity guard, not a rare token",
+          "entity=fail" in fals_logs["F5 entity swap still rejected"])
+    check("negated نزول stays blocked by the polarity filter",
+          "rare=نزول" in fals_logs[
+              "F5 negated claim without source negation dropped"])
 
 
 # ---------------------------------------------------------------------------
@@ -1001,6 +1148,7 @@ def main() -> None:
     test_cf_format_chars()
     test_variant_suffix_order()
     test_p5v5_grounding_policy()
+    test_grounding_curated_alias()
     print(f"\n[offline_tests] {_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
 

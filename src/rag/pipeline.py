@@ -970,6 +970,18 @@ _GROUNDING_DF_THR = 300
 _GROUNDING_GUARD_COV = 0.80
 _GROUNDING_GUARD_BAND = 500
 
+# Curated grounding alias (Phase E.4): the claim token نزول is treated as
+# family-supported only by the exact cited-source surface نزلت, under the
+# same polarity filters as every other family hit.  Deliberately a single
+# hand-curated pair, NOT a general hollow-verb / waw-deletion rule: the
+# Phase E.3 generalization audit showed a shape-based predicate also
+# bridges unrelated roots (صوام/صامت، ثواب/ثابت، راوي/رايت، تورك/تركت),
+# so only this evidence-backed pair is admitted.  See the Phase E.1
+# false-rejection analysis and Phase E.3 audit reports.
+_GROUNDING_CURATED_ALIASES: dict[str, tuple[str, ...]] = {
+    "نزول": ("نزلت",),
+}
+
 # Polarity-inverting particles (غير/بدون), tolerant of و/ف prefixes.  Kept
 # separate from _is_negation_token: غير/بدون do not negate a verb window,
 # they invert the polarity of the following noun ("غير مستحب" vs "مستحب").
@@ -1280,6 +1292,20 @@ def _seed_aligned(t: str, s: str) -> bool:
     _seeds_v2 core stem (استحب/يستحب/مستحب align via 'ستحب'), so a bare
     clitic-prefixed coincidence can no longer exempt a rare token."""
     return bool(_seeds_v2(t) & _seeds_v2(s))
+
+
+def _curated_alias_surfaces(t: str, ref_surface: set[str]) -> set[str]:
+    """Cited surfaces admitted for a claim token via the curated aliases.
+
+    Folded exact-target comparison only (no stem, prefix or suffix
+    expansion): the claim token must be a table key and the cited surface
+    must fold to one of its curated targets; every other token yields the
+    empty set.  Used solely by the rare-token family exemption.
+    """
+    targets = _GROUNDING_CURATED_ALIASES.get(_fold_ar(t))
+    if not targets:
+        return set()
+    return {s for s in ref_surface if _fold_ar(s) in targets}
 
 
 def _seq_support(a: str, b: str, mode: str) -> bool:
@@ -1692,12 +1718,13 @@ def _ground_answer(answer: str, retrieved: list[dict],
             # Rare-token rule on the clitic-v2 union document frequency, with
             # the seed-aligned cited-source family exemption (polarity-
             # filtered: an inverted/negated claim token may only be exempted
-            # by a source variant under the same inversion/negation) and the
-            # material-addition guard: an unmatched token in the uncertain
-            # band (300 < df <= 500) is tolerated only in a well-covered
-            # sentence (coverage >= 0.80), so a genuinely common material
-            # word and an unsupported swap in a weakly-covered sentence stay
-            # distinguishable.
+            # by a source variant under the same inversion/negation), the
+            # Phase E.4 curated single-pair alias (same polarity filters),
+            # and the material-addition guard: an unmatched token in the
+            # uncertain band (300 < df <= 500) is tolerated only in a
+            # well-covered sentence (coverage >= 0.80), so a genuinely common
+            # material word and an unsupported swap in a weakly-covered
+            # sentence stay distinguishable.
             rare: list[tuple[str, int]] = []
             if postings is not None:
                 for j, t in enumerate(content_tokens):
@@ -1705,6 +1732,7 @@ def _ground_answer(answer: str, retrieved: list[dict],
                         continue
                     hits = {s for s in (_fam_of(t) & ref_surface)
                             if _seed_aligned(t, s)}
+                    hits |= _curated_alias_surfaces(t, ref_surface)
                     if j in claim_inv_positions:
                         hits = {s for s in hits if s in ref_inv_follow}
                     if j in claim_neg_positions:
