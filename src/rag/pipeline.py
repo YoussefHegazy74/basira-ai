@@ -9,6 +9,7 @@ Arabic-aware prompt, and generates answers using GPT-4o-mini.
 from __future__ import annotations
 
 import math
+import threading
 import tracemalloc
 import re
 import time
@@ -231,10 +232,15 @@ def _inject_surah_chunks(
 
 
 # ===========================================================================
-# BM25 index (lazy build, cached by (id(chunks), len(chunks)))
+# BM25 index (lazy build, cached by (id(chunks), len(chunks)), single-flight)
 # Posting-list design: builds once in ~2s, searched in O(|q| * avg_postings)
 # ===========================================================================
 _bm25_cache: dict[tuple[int, int], dict] = {}
+
+# Single-flight guard: only one thread may construct a missing index at a
+# time.  Losers of the race re-check the cache under this lock and return the
+# winner's index instead of starting a duplicate build.
+_bm25_build_lock = threading.Lock()
 
 
 # Conjunction/preposition + definite article forms.  Stripping them is safe
@@ -274,7 +280,44 @@ def _tokenize(text: str) -> list[str]:
 
 
 def _build_bm25(chunks: list[dict]) -> dict:
+    """Return the cached BM25 index for *chunks*, building it once if missing.
+
+    Single-flight: concurrent cold callers serialize on `_bm25_build_lock`;
+    the winner constructs the index and the losers re-check the cache after
+    acquiring the lock and reuse the same object.
+    """
+    cache_key = (id(chunks), len(chunks))
+    cached = _bm25_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    with _bm25_build_lock:
+        # Double-checked: another thread may have published the index while
+        # we were waiting for the lock.
+        cached = _bm25_cache.get(cache_key)
+        if cached is not None:
+            return cached
+        # tracemalloc state is process-global: start tracing only when the
+        # process is not already tracing, and let only the starter stop it.
+        # The try/finally guarantees an exception cannot leave tracing on.
+        tracing_started = not tracemalloc.is_tracing()
+        if tracing_started:
+            tracemalloc.start()
+        try:
+            idx = _bm25_construct(chunks, tracing_started)
+        finally:
+            if tracing_started:
+                tracemalloc.stop()
+        _bm25_cache[cache_key] = idx
+        return idx
+
+
+def _bm25_construct(chunks: list[dict], tracing_started: bool) -> dict:
     """Build a BM25 inverted posting-list index.
+
+    The caller (see `_build_bm25`) must hold `_bm25_build_lock` and owns the
+    process-global tracemalloc window (`tracing_started` is True only when
+    this call enabled tracing).
 
     Lexical document composition:
       - fiqh / sira / tafsir:  _tokenize_clean(reference) + body_tokens[:CAP]
@@ -301,11 +344,6 @@ def _build_bm25(chunks: list[dict]) -> dict:
         N:         int
         _chunks:   {id: chunk_dict}
     """
-    cache_key = (id(chunks), len(chunks))
-    if cache_key in _bm25_cache:
-        return _bm25_cache[cache_key]
-
-    tracemalloc.start()
     t0 = time.time()
     N = len(chunks)
     id_map: dict[str, dict] = {c["id"]: c for c in chunks}
@@ -357,19 +395,30 @@ def _build_bm25(chunks: list[dict]) -> dict:
             postings[t].append((cid, weight))
 
     build_time = time.time() - t0
-    current_mem, peak_mem = tracemalloc.get_traced_memory()
-    tracemalloc.stop()
-    print(
-        f"[bm25] built index in {build_time:.2f}s  (N={N})  "
-        f"mem_current={current_mem/1e6:.1f}MB  mem_peak={peak_mem/1e6:.1f}MB"
-    )
+    if tracing_started:
+        current_mem, peak_mem = tracemalloc.get_traced_memory()
+        mem_stats = (f"mem_current={current_mem/1e6:.1f}MB  "
+                     f"mem_peak={peak_mem/1e6:.1f}MB")
+    else:
+        mem_stats = "mem=untraced (process already tracing)"
+    print(f"[bm25] built index in {build_time:.2f}s  (N={N})  {mem_stats}")
 
     idx = {
         "idf": idf, "postings": postings, "dl": dl, "avgdl": avgdl,
         "N": N, "_chunks": id_map, "doc_tok": doc_tok,
     }
-    _bm25_cache[cache_key] = idx
     return idx
+
+
+def prewarm_bm25(chunks: list[dict]) -> dict:
+    """Pre-build (or fetch) the BM25 index for the canonical corpus.
+
+    RAG-03 R2 startup hook: delegates to `_build_bm25` so a prewarm shares
+    R1's single-flight lock, double-checked cache, and exception safety, and
+    populates exactly the cache entry normal retrieval reads.  Returns the
+    shared index object.
+    """
+    return _build_bm25(chunks)
 
 
 def _has_phrase(tokens: list[str], a: str, b: str) -> bool:
@@ -1408,6 +1457,12 @@ def _numbers_normalized(tokens: list[str]) -> list[str]:
     return out
 
 
+# Canonical chat refusal returned when no generated sentence survives
+# grounding.  Shared with `ground_text` so callers can recognise and remap
+# a total rejection.
+_GROUNDING_REFUSAL = "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال."
+
+
 def _ground_answer(answer: str, retrieved: list[dict],
                    corpus_chunks: list[dict] | None = None) -> str:
     """Post-generation grounding filter (tolerant matcher).
@@ -1445,7 +1500,7 @@ def _ground_answer(answer: str, retrieved: list[dict],
     After filtering, strip all (maSdar N) markers from the kept text.
     If nothing survives, return the canonical refusal sentence.
     """
-    REFUSAL = "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال."
+    REFUSAL = _GROUNDING_REFUSAL
     n_chunks = len(retrieved)
 
     # Pre-compute per retrieved chunk: tolerant key / number sets, strict key
@@ -1794,6 +1849,24 @@ def _ground_answer(answer: str, retrieved: list[dict],
     return cleaned
 
 
+def ground_text(answer: str, retrieved: list[dict],
+                corpus_chunks: list[dict] | None = None,
+                refusal: str | None = None) -> str:
+    """Public grounding entry point for endpoints other than /api/chat.
+
+    Thin wrapper over the audited `_ground_answer` engine: the matcher,
+    thresholds and strict checks are unchanged, and /api/chat keeps calling
+    `_ground_answer` directly.  When *refusal* is provided, it replaces the
+    engine's canonical refusal on total rejection so each endpoint can keep
+    its own established refusal contract; ``None`` preserves the chat
+    refusal exactly.
+    """
+    grounded = _ground_answer(answer, retrieved, corpus_chunks)
+    if refusal is not None and grounded == _GROUNDING_REFUSAL:
+        return refusal
+    return grounded
+
+
 # ===========================================================================
 # generate()
 # ===========================================================================
@@ -1834,11 +1907,10 @@ def generate(
     )
     answer = response.choices[0].message.content or ""
 
-    # Post-generation grounding check: filter unsupported sentences,
-    # then strip citation markers before returning to the caller.
-    REFUSAL_PREFIX = "لم أجد في المصادر المتاحة"
-    if REFUSAL_PREFIX not in answer:
-        answer = _ground_answer(answer, retrieved, chunks)
+    # Post-generation grounding check: always filter unsupported sentences
+    # (including any text behind a model-emitted refusal prefix), then strip
+    # citation markers before returning to the caller.
+    answer = _ground_answer(answer, retrieved, chunks)
 
     sources = [f"{c.get('source','غير محدد')} — {c.get('reference','غير محدد')}"
                for c in retrieved]

@@ -12,13 +12,12 @@ Node API that serves the Basira frontend and calls the Python RAG service.
 From `BackEnd/`:
 
 ```
-npm install
+npm ci
 npm start
 ```
 
-`package.json` declares the dependencies but leaves the versions unpinned
-(`"*"`): the original versions could not be recovered from this repository.
-Pin exact versions and commit a lockfile before any real install/deploy.
+Dependencies use caret ranges and a committed `package-lock.json`; prefer
+`npm ci` so installs follow the lockfile exactly.
 
 ## Configuration
 
@@ -48,5 +47,14 @@ python src/rag/model_api.py
 
 It listens on `127.0.0.1:8000` and loads `data/processed/faiss.index` and
 `data/processed/chunks.pkl` (must exist). It reads the repository-root
-`.env` (for example `OPENAI_API_KEY`). Python dependencies are listed in
-`src/rag/model_api_requirements.txt` (also unpinned; pin before deploy).
+`.env` (for example `OPENAI_API_KEY`). Install the pinned dependencies from
+the repository root:
+
+```
+pip install -r src/rag/model_api_requirements.lock
+```
+
+`src/rag/model_api_requirements.lock` is the canonical, complete dependency
+file (generated with Python 3.14); the unpinned
+`src/rag/model_api_requirements.txt` is a partial overview and is not
+sufficient on its own.

@@ -27,6 +27,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 from src.embeddings.embedder import get_client, embed_text
 from src.vector_db.faiss_store import search
 from src.nlp.preprocessor import preprocess, normalize
+from src.rag.pipeline import ground_text
 
 # Default paths for the FAISS index and chunks
 INDEX_PATH = Path("data/processed/faiss.index")
@@ -184,6 +185,74 @@ def _is_yes(val) -> bool:
         return val
     s = str(val).strip().lower()
     return s in {"نعم", "yes", "true", "1", "صحيح"}
+
+
+# ---------------------------------------------------------------------------
+# RAG-02 post-generation validation helpers
+# ---------------------------------------------------------------------------
+
+# Enum taxonomies exactly as requested by SYSTEM_PROMPT above; invalid model
+# output falls back to the pre-existing safe defaults.
+_TEXT_STATUS_VALUES = {"صحيح", "ضعيف", "موضوع", "غير موجود"}
+_DANGER_LEVEL_VALUES = {"منخفضة", "متوسطة", "عالية"}
+_EXPLANATION_STATUS_VALUES = {"موافق", "مخالف", "جزئياً موافق", "لا يوجد"}
+
+# Arabic-Indic digits -> ASCII, so ١٢٣ and 123 compare equal.
+_ARABIC_DIGIT_TABLE = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+
+
+def _validated_enum(value, allowed: set[str], default: str) -> str:
+    """Return *value* when it is one of the prompt's exact enum values."""
+    if isinstance(value, str) and value.strip() in allowed:
+        return value.strip()
+    return default
+
+
+def _normalize_reference(value) -> str:
+    """Normalise a citation for comparison against retrieved references.
+
+    Arabic-Indic digits become ASCII, format/bidi characters are stripped
+    (via the existing matn cleaner), ':' and '،' become spaces, and all
+    whitespace is collapsed.
+    """
+    s = _flatten_source(value)
+    if not s:
+        return ""
+    s = s.translate(_ARABIC_DIGIT_TABLE)
+    s = _strip_format_chars(s)
+    s = s.replace(":", " ").replace("،", " ")
+    return " ".join(s.split())
+
+
+def _reference_is_retrieved(candidate: str, results: list[dict]) -> bool:
+    """True when *candidate* matches a reference actually retrieved.
+
+    Exact normalised equality or bidirectional containment against ONE
+    retrieved reference.  A single generic word with no digit can never
+    validate, so a lone book-name fragment cannot carry a fabricated
+    hadith number past the check.
+    """
+    c = _normalize_reference(candidate)
+    if not c:
+        return False
+    if not any(ch.isdigit() for ch in c) and len(c.split()) < 2:
+        return False
+    for r in results:
+        ref = _normalize_reference(r.get("reference", ""))
+        if not ref:
+            continue
+        if c == ref or c in ref or ref in c:
+            return True
+    return False
+
+
+def _first_retrieved_reference(results: list[dict]) -> str:
+    """Deterministic fallback source: first non-empty retrieved reference."""
+    for r in results:
+        ref = _flatten_source(r.get("reference", ""))
+        if ref.strip():
+            return ref.strip()
+    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -488,39 +557,82 @@ def verify_full(
         else gpt_full_text
     )
 
-    return {
-        "text_status": get_key(
+    # --- RAG-02: proportionate post-generation validation ---
+    # Enums keep only values the prompt actually defines; a response with no
+    # retrieved evidence can never attest authenticity.
+    text_status = _validated_enum(
+        get_key(
             answer,
             "text_status", "صحة_النص", "صحة النص", "الحالة", "حالة_النص",
             "status", "النتيجة",
             default="غير موجود",
         ),
+        _TEXT_STATUS_VALUES,
+        "غير موجود",
+    )
+    if not results:
+        text_status = "غير موجود"
+
+    # Citation: a non-empty GPT source is kept only when it matches a
+    # reference that was actually retrieved; otherwise it is replaced with
+    # the top retrieved reference (deterministic) or emptied.  An empty
+    # model source is preserved as the safe empty representation.
+    raw_source = _flatten_source(
+        get_key(answer, "source", "المصدر", "مصدر", "المصدر_الموثوق")
+    )
+    if not raw_source.strip():
+        source = ""
+    elif _reference_is_retrieved(raw_source, results):
+        source = raw_source
+    else:
+        source = _first_retrieved_reference(results)
+
+    # Sourced prose is grounded against the retrieved evidence; rejection
+    # empties the field.  explanation_verdict is deliberately left as the
+    # model's evaluative reasoning about the provided explanation (prompt
+    # taxonomy, not source content), so the citation-oriented matcher is not
+    # applied to it.
+    raw_correct_explanation = get_key(
+        answer, "correct_explanation", "الشرح الصحيح", "الشرح_الصحيح",
+        "الشرح الصحيح من المصادر",
+    )
+    if isinstance(raw_correct_explanation, str) and raw_correct_explanation.strip():
+        correct_explanation = ground_text(
+            raw_correct_explanation, results, chunks, refusal="",
+        )
+    else:
+        correct_explanation = ""
+
+    return {
+        "text_status": text_status,
         "is_truncated": final_is_truncated,
         "missing_part": final_missing_part,
         "full_text": final_full_text,
-        "source": _flatten_source(
-            get_key(answer, "source", "المصدر", "مصدر", "المصدر_الموثوق")
+        "source": source,
+        "danger_level": _validated_enum(
+            get_key(
+                answer,
+                "danger_level", "درجة الخطورة", "درجة_الخطورة", "الخطورة",
+                default="منخفضة",
+            ),
+            _DANGER_LEVEL_VALUES,
+            "منخفضة",
         ),
-        "danger_level": get_key(
-            answer,
-            "danger_level", "درجة الخطورة", "درجة_الخطورة", "الخطورة",
-            default="منخفضة",
-        ),
-        "explanation_status": get_key(
-            answer,
-            "explanation_status", "تقييم الشرح", "تقييم_الشرح",
-            "حكم_الشرح",
-            default="لا يوجد",
+        "explanation_status": _validated_enum(
+            get_key(
+                answer,
+                "explanation_status", "تقييم الشرح", "تقييم_الشرح",
+                "حكم_الشرح",
+                default="لا يوجد",
+            ),
+            _EXPLANATION_STATUS_VALUES,
+            "لا يوجد",
         ),
         "explanation_verdict": get_key(
             answer,
             "explanation_verdict", "سبب الحكم", "سبب_الحكم",
         ),
-        "correct_explanation": get_key(
-            answer,
-            "correct_explanation", "الشرح الصحيح", "الشرح_الصحيح",
-            "الشرح الصحيح من المصادر",
-        ),
+        "correct_explanation": correct_explanation,
         "input_text": text,
         "input_explanation": explanation or "",
     }

@@ -18,6 +18,7 @@ import faiss
 from src.embeddings.embedder import get_client, embed_text
 from src.vector_db.faiss_store import search
 from src.nlp.preprocessor import preprocess
+from src.rag.pipeline import ground_text
 
 # Default paths for the FAISS index and chunks
 INDEX_PATH = Path("data/processed/faiss.index")
@@ -26,6 +27,11 @@ CHUNKS_PATH = Path("data/processed/chunks.pkl")
 # Minimum cosine-similarity score for a Quran chunk match to be trusted.
 # Real ayahs score ≥ 0.72; fabricated text scores ~0.44.
 _QURAN_SCORE_THRESHOLD = 0.55
+
+# Canonical refusal returned when no tafsir chunk is found and when
+# post-generation grounding rejects the generated prose (RAG-02).  Matches
+# the long-standing no-match response byte for byte.
+_TAFSIR_REFUSAL = "لم أجد تفسير هذه الآية في قاعدة البيانات."
 
 # ---------------------------------------------------------------------------
 # Module-level tafsir-map cache (built once per process, keyed by id(chunks))
@@ -284,7 +290,7 @@ def get_tafsir(
     # Nothing found
     if primary is None:
         return {
-            "tafsir": "لم أجد تفسير هذه الآية في قاعدة البيانات.",
+            "tafsir": _TAFSIR_REFUSAL,
             "context": "",
             "source": "",
             "input_ayah": ayah_text,
@@ -320,6 +326,7 @@ def get_tafsir(
     if debug:
         print(f"\n[DEBUG] Raw GPT response:\n{raw_answer}")
 
+    parse_failed = False
     try:
         answer = json.loads(raw_answer)
     except json.JSONDecodeError:
@@ -327,21 +334,49 @@ def get_tafsir(
             "tafsir": "لم أجد تفسير هذه الآية في قاعدة البيانات",
             "context": "",
         }
+        parse_failed = True
 
     if debug:
         print(f"[DEBUG] Parsed keys: {list(answer.keys())}")
 
+    tafsir_text = get_key(
+        answer,
+        "tafsir", "التفسير", "نص_التفسير", "تفسير",
+        default="لم أجد تفسير هذه الآية في قاعدة البيانات",
+    )
+    context_text = get_key(
+        answer,
+        "context", "السياق", "سبب_النزول", "السياق_وسبب_النزول",
+        "السياق وسبب النزول",
+    )
+
+    # RAG-02: ground the generated prose against the exact evidence sent to
+    # the model (primary + next chunk); `chunks` only feeds the engine's
+    # corpus-frequency checks.  Non-string model output is coerced so the
+    # response keeps its string contract and grounding can never raise.
+    if not isinstance(tafsir_text, str):
+        tafsir_text = "" if tafsir_text is None else str(tafsir_text)
+    if not isinstance(context_text, str):
+        context_text = "" if context_text is None else str(context_text)
+    if parse_failed:
+        grounded_tafsir = tafsir_text
+        grounded_context = context_text
+    else:
+        grounded_tafsir = ground_text(
+            tafsir_text, context_chunks, chunks, refusal=_TAFSIR_REFUSAL,
+        )
+        if (grounded_tafsir == _TAFSIR_REFUSAL
+                or not context_text.strip()):
+            # Never keep ungrounded context next to a rejected tafsir.
+            grounded_context = ""
+        else:
+            grounded_context = ground_text(
+                context_text, context_chunks, chunks, refusal="",
+            )
+
     return {
-        "tafsir": get_key(
-            answer,
-            "tafsir", "التفسير", "نص_التفسير", "تفسير",
-            default="لم أجد تفسير هذه الآية في قاعدة البيانات",
-        ),
-        "context": get_key(
-            answer,
-            "context", "السياق", "سبب_النزول", "السياق_وسبب_النزول",
-            "السياق وسبب النزول",
-        ),
+        "tafsir": grounded_tafsir,
+        "context": grounded_context,
         # Source is always computed from the chunk reference — never from GPT
         "source": source_str,
         "input_ayah": ayah_text,

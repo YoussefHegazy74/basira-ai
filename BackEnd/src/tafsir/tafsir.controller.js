@@ -1,6 +1,7 @@
 const HttpStatus = require("../utils/HttpStatusText.js");
 const asyncWrapper = require("../middleware/Async_wrapper.js");
 const tafsirService = require("./tafsir.service.js");
+const crypto = require("node:crypto");
 const getTafsir = asyncWrapper(async (req, res, next) => {
   let guestKey;
   if (!req.user) {

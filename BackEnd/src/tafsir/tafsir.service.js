@@ -28,7 +28,7 @@ const tafsir = async (ayah, userId, guestKey) => {
     throw new AppError(400, "Ayah is required", HttpStatus.BAD_REQUEST);
   }
   if (!userId) {
-    return await gusetTafsir(ayah, userId, null);
+    return await gusetTafsir(ayah, userId, guestKey);
   }
   return await userTafsir(ayah, userId, guestKey);
 };

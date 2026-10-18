@@ -48,6 +48,22 @@ pin down the mechanics that the eval harness measures statistically:
     exact folded match, no bare-stem/reverse/suffix expansion, no effect
     on quote verification or the entity guard, and the Phase E.3 collision
     falsifiers (صوام/صامت، راوي/رايت، ثواب/ثابت، تورك/تركت) stay dropped.
+  * BM25 single-flight initialization (RAG-03 R1): concurrent cold callers
+    build exactly one index, share the cached object, recover from failed
+    builds (no poisoned entry, lock released), and never stop a tracemalloc
+    window they did not start.
+  * Startup prewarming and readiness (RAG-03 R2): ASGI lifespan startup
+    prewarms the canonical corpus through the same R1 cache exactly once,
+    readiness is false before initialization and after shutdown, becomes
+    true only after a successful prewarm, a failed prewarm never reports
+    ready (fail-fast startup, released lock, no poisoned cache), and
+    repeated lifecycle calls reuse the prewarmed index without rebuilding.
+  * RAG-02 endpoint validation: tafsir/context grounded against the exact
+    retrieved evidence with the endpoint refusal on rejection; verify
+    correct_explanation grounded, fabricated citations replaced by
+    retrieved references, enum-like fields validated with safe defaults,
+    empty retrieval forced to غير موجود, deterministic truncation
+    precedence preserved, and the /api/chat grounding path unchanged.
 
 Usage:
     PYTHONDONTWRITEBYTECODE=1 venv/bin/python src/rag/offline_tests.py
@@ -61,11 +77,19 @@ import contextlib
 import io
 import json
 import sys
+import threading
+import time
+import tracemalloc
 from types import SimpleNamespace
 
 sys.path.insert(0, ".")
 
+from fastapi.testclient import TestClient  # noqa: E402
+
+import src.rag.model_api as M  # noqa: E402
 import src.rag.pipeline as P  # noqa: E402
+import src.rag.tafsir as G  # noqa: E402
+import src.rag.verify_full as V  # noqa: E402
 from src.embeddings.embedder import (  # noqa: E402
     DIM,
     EMBEDDING_MODEL,
@@ -674,42 +698,45 @@ def test_multi_evidence_selection() -> None:
 
 def test_query_embedding_file() -> None:
     print("\n[10] Cached query-embedding file")
+    import os  # noqa: PLC0415
+    import tempfile  # noqa: PLC0415
     from src.rag.offline_eval import _load_query_embeddings, _mean_vector  # noqa: PLC0415
 
-    path = "/tmp/opencode/offline_tests_query_embeddings.json"
-    good = {
-        "q1": {"clean": [0.1, 0.2, 0.3, 0.4], "model": "test"},
-        "q2": {"clean": [1.0, 0.0, 0.0, 0.0], "raw": [0.0, 1.0, 0.0, 0.0]},
-    }
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump(good, fh)
-    loaded = _load_query_embeddings(path, dim=4)
-    check("loader accepts valid file", set(loaded) == {"q1", "q2"})
-    check("raw falls back to clean", loaded["q1"]["raw"] == loaded["q1"]["clean"])
-    check("explicit raw preserved", loaded["q2"]["raw"] == [0.0, 1.0, 0.0, 0.0])
+    with tempfile.TemporaryDirectory(prefix="basira_offline_tests_") as tmpdir:
+        path = os.path.join(tmpdir, "offline_tests_query_embeddings.json")
+        good = {
+            "q1": {"clean": [0.1, 0.2, 0.3, 0.4], "model": "test"},
+            "q2": {"clean": [1.0, 0.0, 0.0, 0.0], "raw": [0.0, 1.0, 0.0, 0.0]},
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(good, fh)
+        loaded = _load_query_embeddings(path, dim=4)
+        check("loader accepts valid file", set(loaded) == {"q1", "q2"})
+        check("raw falls back to clean", loaded["q1"]["raw"] == loaded["q1"]["clean"])
+        check("explicit raw preserved", loaded["q2"]["raw"] == [0.0, 1.0, 0.0, 0.0])
 
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"bad": {"clean": [1.0, 2.0]}}, fh)
-    try:
-        _load_query_embeddings(path, dim=4)
-        dim_err = False
-    except ValueError as exc:
-        dim_err = "bad" in str(exc) and "4 numbers" in str(exc)
-    check("wrong dimension rejected with the question id named", dim_err)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"bad": {"clean": [1.0, 2.0]}}, fh)
+        try:
+            _load_query_embeddings(path, dim=4)
+            dim_err = False
+        except ValueError as exc:
+            dim_err = "bad" in str(exc) and "4 numbers" in str(exc)
+        check("wrong dimension rejected with the question id named", dim_err)
 
-    with open(path, "w", encoding="utf-8") as fh:
-        json.dump({"bad": {"raw": [1.0, 2.0, 3.0, 4.0]}}, fh)
-    try:
-        _load_query_embeddings(path, dim=4)
-        missing_err = False
-    except ValueError as exc:
-        missing_err = "clean" in str(exc)
-    check("missing clean vector rejected", missing_err)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"bad": {"raw": [1.0, 2.0, 3.0, 4.0]}}, fh)
+        try:
+            _load_query_embeddings(path, dim=4)
+            missing_err = False
+        except ValueError as exc:
+            missing_err = "clean" in str(exc)
+        check("missing clean vector rejected", missing_err)
 
-    mean = _mean_vector([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
-    check("mean vector is L2-normalized",
-          abs(mean[0] - 0.70710678) < 1e-6 and abs(mean[1] - 0.70710678) < 1e-6)
-    check("zero-vector guard", _mean_vector([[0.0, 0.0], [0.0, 0.0]]) == [0.0, 0.0])
+        mean = _mean_vector([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]])
+        check("mean vector is L2-normalized",
+              abs(mean[0] - 0.70710678) < 1e-6 and abs(mean[1] - 0.70710678) < 1e-6)
+        check("zero-vector guard", _mean_vector([[0.0, 0.0], [0.0, 0.0]]) == [0.0, 0.0])
 
 
 # ---------------------------------------------------------------------------
@@ -1132,6 +1159,696 @@ def test_grounding_curated_alias() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 16. Refusal-prefix grounding regression (RAG-01)
+# ---------------------------------------------------------------------------
+
+def test_refusal_prefix_grounding() -> None:
+    print("\n[16] Refusal-prefix grounding regression (RAG-01)")
+    chunk = _chunk("rf0", "fiqh",
+                   "إنما الأعمال بالنيات وإنما لكل امرئ ما نوى")
+    retrieved = [dict(chunk, score=0.91, _gate_passed=True)]
+    corpus = [chunk]
+
+    orig_retrieve = P.retrieve
+    P.retrieve = lambda query, index, chunks, client, top_k=5: [
+        dict(retrieved[0])]
+    try:
+        hallucination = "الصلاة لا تجب على المسلم في السفر مطلقا."
+        supported = "إنما الأعمال بالنيات وإنما لكل امرئ ما نوى."
+        supported_cited = (supported[:-1] + " (مصدر 1).")
+        hallucination_cited = (hallucination[:-1] + " (مصدر 1).")
+
+        def answer_for(text: str) -> str:
+            chat = _FakeChat({}, text)
+            return P.generate("سؤال", None, corpus, chat)["answer"]
+
+        # A. Unsupported content without the prefix is dropped.
+        out = answer_for(hallucination)
+        check("unsupported claim without refusal prefix is dropped",
+              out == REFUSAL)
+
+        # B. The same content behind the conventional refusal prefix must
+        #    not skip grounding (the RAG-01 bypass).
+        out = answer_for(REFUSAL + " " + hallucination)
+        check("refusal prefix cannot skip the grounding filter",
+              out == REFUSAL)
+        check("smuggled claim is absent from the returned answer",
+              hallucination not in out)
+
+        # C. A bare refusal stays the canonical refusal.
+        out = answer_for(REFUSAL)
+        check("canonical refusal is preserved", out == REFUSAL)
+
+        # D. A supported answer still survives grounding unchanged.
+        out = answer_for(supported_cited)
+        check("supported answer survives grounding", out == supported)
+
+        # E. Mixed supported/unsupported sentences with citations: keep only
+        #    the supported one.
+        out = answer_for(supported_cited + " " + hallucination_cited)
+        check("mixed answer keeps the supported sentence", out == supported)
+        check("mixed answer drops the unsupported sentence",
+              hallucination not in out)
+    finally:
+        P.retrieve = orig_retrieve
+
+
+# ---------------------------------------------------------------------------
+# 17. Single-flight BM25 initialization (RAG-03 R1)
+# ---------------------------------------------------------------------------
+
+def _bm25_synth_corpus(prefix: str, n: int = 60) -> list[dict]:
+    return [
+        _chunk(f"{prefix}{i}", "fiqh",
+               f"نص تجريبي رقم {i} يشمل كلمات متكررة وبحثا لفظيا {i}")
+        for i in range(n)
+    ]
+
+
+def test_bm25_single_flight() -> None:
+    print("\n[17] Single-flight BM25 initialization (RAG-03 R1)")
+    corpus = _bm25_synth_corpus("sf")
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+
+    orig_tokenize = P._tokenize_clean
+    first_call = {"seen": False}
+    first_gate = threading.Lock()
+
+    def slow_first_tokenize(text: str) -> list[str]:
+        # Widen the race window: the first builder pauses after entering the
+        # construction body, so without single-flight every other cold caller
+        # has already passed the cache check before any index is published.
+        with first_gate:
+            is_first = not first_call["seen"]
+            first_call["seen"] = True
+        if is_first:
+            time.sleep(0.3)
+        return orig_tokenize(text)
+
+    n_threads = 6
+    barrier = threading.Barrier(n_threads)
+    results: list[dict] = []
+    errors: list[BaseException] = []
+    result_gate = threading.Lock()
+
+    def worker() -> None:
+        try:
+            barrier.wait(timeout=15)
+            idx = P._build_bm25(corpus)
+            with result_gate:
+                results.append(idx)
+        except BaseException as exc:  # surfaced through `errors` below
+            with result_gate:
+                errors.append(exc)
+
+    P._tokenize_clean = slow_first_tokenize
+    try:
+        threads = [threading.Thread(target=worker) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=30)
+    finally:
+        P._tokenize_clean = orig_tokenize
+
+    check("all concurrent cold callers obtained an index",
+          not errors and len(results) == n_threads)
+    check("concurrent cold callers built exactly one index object",
+          len({id(r) for r in results}) == 1)
+    check("cache stores the shared index",
+          bool(results) and P._bm25_cache.get(key) is results[0])
+
+    first = P._bm25_cache.get(key)
+    second = P._build_bm25(corpus)
+    check("subsequent call is a cache hit (same object, no rebuild)",
+          second is first)
+    P._bm25_cache.pop(key, None)
+
+
+def test_bm25_failure_recovery() -> None:
+    print("\n[18] BM25 failed-build recovery (RAG-03 R1)")
+    corpus = _bm25_synth_corpus("fr", n=20)
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+
+    orig_tokenize = P._tokenize_clean
+    calls = {"n": 0}
+
+    def exploding_tokenize(text: str) -> list[str]:
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("injected tokenizer failure")
+        return orig_tokenize(text)
+
+    tracing_before = tracemalloc.is_tracing()
+    P._tokenize_clean = exploding_tokenize
+    raised = False
+    try:
+        P._build_bm25(corpus)
+    except RuntimeError:
+        raised = True
+    finally:
+        P._tokenize_clean = orig_tokenize
+
+    check("injected build failure propagates", raised)
+    check("failed build leaves no cache entry", key not in P._bm25_cache)
+    acquired = P._bm25_build_lock.acquire(blocking=False)
+    if acquired:
+        P._bm25_build_lock.release()
+    check("build lock is released after a failed build", acquired)
+    check("failed build does not leave tracing enabled",
+          tracemalloc.is_tracing() is tracing_before)
+
+    idx = P._build_bm25(corpus)
+    check("a later valid build succeeds after the failure",
+          idx.get("N") == len(corpus))
+    hits = P._bm25_search(["تجريبي"], corpus, top_k=3)
+    check("recovered index serves BM25 searches", len(hits) > 0)
+    P._bm25_cache.pop(key, None)
+
+
+def test_bm25_tracing_ownership() -> None:
+    print("\n[19] BM25 tracemalloc ownership (RAG-03 R1)")
+    check("suite runs this test with tracing off",
+          not tracemalloc.is_tracing())
+
+    # Simulate a foreign tracer: tracing is already active when the build
+    # runs, so the build must leave it running.
+    corpus = _bm25_synth_corpus("tr", n=20)
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+    tracemalloc.start()
+    try:
+        P._build_bm25(corpus)
+        check("build leaves externally started tracing active",
+              tracemalloc.is_tracing())
+    finally:
+        tracemalloc.stop()
+        P._bm25_cache.pop(key, None)
+
+    # Normal path: tracing off before the build, off again after it.
+    corpus2 = _bm25_synth_corpus("tr2", n=20)
+    key2 = (id(corpus2), len(corpus2))
+    P._bm25_cache.pop(key2, None)
+    P._build_bm25(corpus2)
+    check("build stops tracing it started", not tracemalloc.is_tracing())
+    P._bm25_cache.pop(key2, None)
+
+
+def test_bm25_grounding_reuse() -> None:
+    print("\n[20] Grounding reuses the single BM25 build (RAG-01 path)")
+    chunk = _chunk("sfg0", "fiqh",
+                   "إنما الأعمال بالنيات وإنما لكل امرئ ما نوى")
+    retrieved = [dict(chunk, score=0.91, _gate_passed=True)]
+    corpus = [chunk]
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+
+    orig_retrieve = P.retrieve
+    P.retrieve = lambda query, index, chunks, client, top_k=5: [
+        dict(retrieved[0])]
+    try:
+        chat = _FakeChat(
+            {}, "الصلاة لا تجب على المسلم في السفر مطلقا (مصدر 1).")
+        out = P.generate("سؤال", None, corpus, chat)
+    finally:
+        P.retrieve = orig_retrieve
+
+    check("unsupported answer is grounded to the canonical refusal",
+          out["answer"] == REFUSAL)
+    built = P._bm25_cache.get(key)
+    check("grounding built the BM25 index for the corpus", built is not None)
+    reused = P._build_bm25(corpus)
+    check("grounding index is reused (single build)",
+          built is not None and reused is built)
+    P._bm25_cache.pop(key, None)
+
+
+# ---------------------------------------------------------------------------
+# 21-23. Startup prewarming and readiness (RAG-03 R2)
+# ---------------------------------------------------------------------------
+
+def _r2_fake_resources(corpus: list[dict]):
+    """Return an `_initialize_resources` replacement installing fake globals.
+
+    The real loader reads the production FAISS index and chunks.pkl; these
+    tests must stay offline, so the lifespan loads a synthetic corpus instead.
+    """
+    def _init() -> None:
+        M.index = None
+        M.chunks = corpus
+        M.client = None
+    return _init
+
+
+def _r2_save_state() -> tuple:
+    return (M._initialize_resources, P._bm25_construct, M._service_phase,
+            M.index, M.chunks, M.client)
+
+
+def _r2_restore_state(state: tuple) -> None:
+    (M._initialize_resources, P._bm25_construct, M._service_phase,
+     M.index, M.chunks, M.client) = state
+
+
+def test_r2_startup_prewarm() -> None:
+    print("\n[21] R2 startup prewarm builds the canonical corpus once")
+    corpus = _bm25_synth_corpus("r2a", n=30)
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+
+    state = _r2_save_state()
+    orig_construct = P._bm25_construct
+    calls = {"n": 0}
+
+    def counting_construct(chunks: list[dict], tracing_started: bool) -> dict:
+        calls["n"] += 1
+        return orig_construct(chunks, tracing_started)
+
+    M._service_phase = M._INITIALIZING
+    M._initialize_resources = _r2_fake_resources(corpus)
+    P._bm25_construct = counting_construct
+    try:
+        # Required initialization has not run yet: not ready, nothing built.
+        probe = TestClient(M.app)
+        r = probe.get("/ready")
+        check("readiness is false while initialization is incomplete",
+              r.status_code == 503 and r.json() == {"status": "initializing"})
+        check("nothing was prewarmed before startup", calls["n"] == 0)
+
+        with TestClient(M.app) as client:
+            check("startup prewarmed the canonical corpus exactly once",
+                  calls["n"] == 1)
+            check("service is ready only after a successful prewarm",
+                  M.service_phase() == "ready")
+            r = client.get("/ready")
+            check("GET /ready reports 200 ready",
+                  r.status_code == 200 and r.json() == {"status": "ready"})
+            r = client.get("/health")
+            check("GET /health reports liveness",
+                  r.status_code == 200 and r.json() == {"status": "ok"})
+            built = P._bm25_cache.get(key)
+            check("prewarmed index is cached under the canonical key",
+                  built is not None)
+            reused = P._build_bm25(corpus)
+            check("post-startup lookup reuses the prewarmed index",
+                  reused is built and calls["n"] == 1)
+        check("shutdown records the stopped phase",
+              M.service_phase() == "stopped")
+    finally:
+        _r2_restore_state(state)
+        P._bm25_cache.pop(key, None)
+
+
+def test_r2_prewarm_failure() -> None:
+    print("\n[22] R2 prewarm failure fails startup and never reports ready")
+    corpus = _bm25_synth_corpus("r2b", n=20)
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+
+    state = _r2_save_state()
+    tracing_before = tracemalloc.is_tracing()
+
+    def exploding_construct(chunks: list[dict], tracing_started: bool) -> dict:
+        raise RuntimeError("injected prewarm failure")
+
+    M._service_phase = M._INITIALIZING
+    M._initialize_resources = _r2_fake_resources(corpus)
+    P._bm25_construct = exploding_construct
+    try:
+        raised = False
+        try:
+            with TestClient(M.app):
+                pass
+        except RuntimeError:
+            raised = True
+        check("prewarm failure aborts startup (fail-fast policy)", raised)
+        check("failed startup never marks the service ready",
+              M.service_phase() == "failed")
+
+        r = TestClient(M.app).get("/ready")
+        check("readiness reports 503 failed after a failed prewarm",
+              r.status_code == 503 and r.json() == {"status": "failed"})
+        check("failed prewarm left no cache entry", key not in P._bm25_cache)
+        acquired = P._bm25_build_lock.acquire(blocking=False)
+        if acquired:
+            P._bm25_build_lock.release()
+        check("failed prewarm released the build lock", acquired)
+        check("failed prewarm left tracemalloc in its original state",
+              tracemalloc.is_tracing() is tracing_before)
+    finally:
+        _r2_restore_state(state)
+        P._bm25_cache.pop(key, None)
+
+
+def test_r2_lifecycle_repeat_and_shutdown() -> None:
+    print("\n[23] R2 repeated lifecycle calls reuse the prewarmed index")
+    corpus = _bm25_synth_corpus("r2c", n=15)
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+
+    state = _r2_save_state()
+    orig_construct = P._bm25_construct
+    calls = {"n": 0}
+
+    def counting_construct(chunks: list[dict], tracing_started: bool) -> dict:
+        calls["n"] += 1
+        return orig_construct(chunks, tracing_started)
+
+    M._service_phase = M._INITIALIZING
+    M._initialize_resources = _r2_fake_resources(corpus)
+    P._bm25_construct = counting_construct
+    try:
+        with TestClient(M.app) as client:
+            check("first startup prewarms once", calls["n"] == 1)
+            r = client.get("/ready")
+            check("first startup reports ready",
+                  r.status_code == 200 and r.json() == {"status": "ready"})
+        check("first shutdown records the stopped phase",
+              M.service_phase() == "stopped")
+        r = TestClient(M.app).get("/ready")
+        check("readiness is false after shutdown",
+              r.status_code == 503 and r.json() == {"status": "stopped"})
+
+        with TestClient(M.app) as client:
+            check("repeated startup does not rebuild (cache reuse)",
+                  calls["n"] == 1)
+            check("second startup reports ready again",
+                  M.service_phase() == "ready")
+        check("second shutdown records the stopped phase",
+              M.service_phase() == "stopped")
+    finally:
+        _r2_restore_state(state)
+        P._bm25_cache.pop(key, None)
+
+
+# ---------------------------------------------------------------------------
+# 24-26. RAG-02 endpoint grounding/validation (tafsir + verify)
+# ---------------------------------------------------------------------------
+
+# Fixture texts mirror the shapes these endpoints actually see: an
+# Ibn-Kathir-style tafsir excerpt pair, and a hadith verification case with a
+# matn metadata entry for the deterministic truncation check.
+_RAG02_TAFSIR_PRIMARY = (
+    "هذه الآية أعظم آية في القرآن الكريم، وهي آية الكرسي، أخبر الله فيها عن "
+    "وحدانيته وقيوميته، وأنه الحي الذي لا يموت، والقيوم الذي لا تأخذه سنة "
+    "ولا نوم، وله ما في السماوات وما في الأرض"
+)
+_RAG02_TAFSIR_NEXT = (
+    "ذكر ابن كثير أن آية الكرسي تجمع أصول التوحيد، وفيها إثبات العلم والقدرة "
+    "والملك لله وحده، ومن قرأها في ليلته لم يزل عليه من الله حافظ"
+)
+# Morphological/clitic paraphrase (آية→آيات, وحدانيته→بوحدانيته, reordered):
+# the realistic shape of a temperature-0 summariser constrained to the
+# excerpts — must survive grounding.
+_RAG02_TAFSIR_PARAPHRASE = (
+    "تعد هذه الآية أعظم آيات القرآن، فقد أخبر الله فيها بوحدانيته "
+    "وقيوميته، فهو الحي الذي لا يموت، والقيوم الذي لا تأخذه سنة ولا نوم"
+)
+# Distinctive fabricated claim (asbab al-nuzul + a hadith attribution that
+# occurs nowhere in the supplied evidence) — must be rejected.
+_RAG02_UNSAFE_CLAIM = (
+    "وقد ذهب جمهور المفسرين إلى أن هذه الآية نزلت في المدينة، وروى "
+    "البخاري أن سبب نزولها غزوة تبوك"
+)
+
+_RAG02_VERIFY_TEXT = "إنما الأعمال بالنيات"
+_RAG02_VERIFY_EVIDENCE = (
+    "قال رسول الله صلى الله عليه وسلم إنما الأعمال بالنيات وإنما لكل امرئ "
+    "ما نوى"
+)
+_RAG02_VERIFY_MATN = "إنما الأعمال بالنيات وإنما لكل امرئ ما نوى"
+
+
+def _rag02_tafsir_fixtures() -> tuple[dict, dict]:
+    primary = _chunk("t1", "tafsir", _RAG02_TAFSIR_PRIMARY,
+                     ref="تفسير ابن كثير 2:255")
+    nxt = _chunk("t2", "tafsir", _RAG02_TAFSIR_NEXT,
+                 ref="تفسير ابن كثير 2:256")
+    return primary, nxt
+
+
+def _rag02_high_df_corpus(evidence: list[dict], prefix: str,
+                          n: int = 600) -> list[dict]:
+    """Corpus whose filler docs make paraphrase connectives high-df.
+
+    The grounding engine's rare-token bound is document-frequency based; in
+    the production corpus these words are extremely common, so tests must
+    not classify them as rare.  The actual grounding evidence remains the
+    two retrieved excerpts.
+    """
+    vocab = "تعد فقد فهو وهو وقد آيات أعظم فيها والقيوم بوحدانيته"
+    corpus = [dict(c) for c in evidence]
+    for i in range(n):
+        corpus.append(_chunk(f"{prefix}f{i}", "fiqh",
+                             f"{vocab} نص تجريبي رقم {i}"))
+    return corpus
+
+
+def _rag02_verify_fixtures() -> tuple[dict, dict]:
+    hadith = _chunk("h1", "hadith", _RAG02_VERIFY_EVIDENCE,
+                    ref="صحيح البخاري 1")
+    hadith["metadata"] = {"matn": _RAG02_VERIFY_MATN}
+    quran = _chunk("q1", "quran", "لا يكلف الله نفسا إلا وسعها",
+                   ref="البقرة 286")
+    return hadith, quran
+
+
+def test_rag02_tafsir_grounding() -> None:
+    print("\n[24] RAG-02 tafsir post-generation grounding")
+    primary, nxt = _rag02_tafsir_fixtures()
+    corpus = _rag02_high_df_corpus([primary, nxt], "rag02t")
+    key = (id(corpus), len(corpus))
+    P._bm25_cache.pop(key, None)
+
+    orig_resolve = G.resolve_tafsir_reference
+    try:
+        def run(payload, resolve=(primary, nxt, "2:255"), explode=False):
+            G.resolve_tafsir_reference = (
+                lambda ayah_text, index, chunks, client, debug=False: resolve
+            )
+            chat = _FakeChat({}, payload, explode=explode)
+            try:
+                return G.get_tafsir("آية اختبار", object(), corpus, chat), chat
+            finally:
+                G.resolve_tafsir_reference = orig_resolve
+
+        out, _ = run(json.dumps(
+            {"tafsir": _RAG02_TAFSIR_PRIMARY, "context": _RAG02_TAFSIR_NEXT},
+            ensure_ascii=False))
+        check("supported tafsir prose is retained",
+              out["tafsir"] == _RAG02_TAFSIR_PRIMARY)
+        check("supported context is retained",
+              out["context"] == _RAG02_TAFSIR_NEXT)
+        check("source stays the server-derived chunk reference",
+              out["source"] == "2:255")
+        check("tafsir response keys unchanged",
+              sorted(out) == ["context", "input_ayah", "source", "tafsir"])
+        check("tafsir response values are all strings",
+              all(isinstance(v, str) for v in out.values()))
+
+        out, _ = run(json.dumps(
+            {"tafsir": _RAG02_TAFSIR_PARAPHRASE, "context": ""},
+            ensure_ascii=False))
+        check("reasonable morphological paraphrase is not rejected",
+              out["tafsir"] == _RAG02_TAFSIR_PARAPHRASE)
+
+        # Falsifiable: pre-fix this returned the fabricated text verbatim.
+        out, _ = run(json.dumps(
+            {"tafsir": _RAG02_UNSAFE_CLAIM, "context": _RAG02_TAFSIR_NEXT},
+            ensure_ascii=False))
+        check("distinctive unsupported tafsir claim is rejected",
+              out["tafsir"] == G._TAFSIR_REFUSAL)
+        check("context is emptied when tafsir is rejected",
+              out["context"] == "")
+
+        out, _ = run(json.dumps(
+            {"tafsir": _RAG02_TAFSIR_PRIMARY, "context": _RAG02_UNSAFE_CLAIM},
+            ensure_ascii=False))
+        check("safe tafsir survives an ungrounded context",
+              out["tafsir"] == _RAG02_TAFSIR_PRIMARY)
+        check("ungrounded context is dropped independently",
+              out["context"] == "")
+
+        out, chat = run("{}", resolve=(None, None, ""), explode=True)
+        check("no-match returns the established refusal",
+              out["tafsir"] == G._TAFSIR_REFUSAL and out["source"] == "")
+        check("no-match path never calls the model", chat.called is False)
+
+        out, _ = run("not json at all")
+        check("malformed JSON keeps the established fallback",
+              out["tafsir"] == "لم أجد تفسير هذه الآية في قاعدة البيانات"
+              and out["context"] == "")
+        check("malformed JSON still preserves the server-derived source",
+              out["source"] == "2:255")
+    finally:
+        G.resolve_tafsir_reference = orig_resolve
+        P._bm25_cache.pop(key, None)
+
+
+def test_rag02_verify_validation() -> None:
+    print("\n[25] RAG-02 verify post-generation validation")
+    hadith, quran = _rag02_verify_fixtures()
+    corpus = [hadith, quran]
+    results = [
+        {"id": "h1", "source": "hadith", "reference": "صحيح البخاري 1",
+         "original_text": _RAG02_VERIFY_EVIDENCE, "score": 0.92},
+        {"id": "q1", "source": "quran", "reference": "البقرة 286",
+         "original_text": "لا يكلف الله نفسا إلا وسعها", "score": 0.71},
+    ]
+    orig_search = V._dual_search
+    try:
+        def run(payload, res=results, text=_RAG02_VERIFY_TEXT):
+            V._dual_search = (
+                lambda t, c, i, ch, top_k, debug=False: list(res)
+            )
+            chat = _FakeChat({}, payload)
+            try:
+                return V.verify_full(text, "شرح", object(), corpus, chat)
+            finally:
+                V._dual_search = orig_search
+
+        def payload(**over):
+            base = {
+                "text_status": "صحيح", "is_truncated": "لا",
+                "missing_part": "", "full_text": "", "source": "",
+                "danger_level": "منخفضة", "explanation_status": "موافق",
+                "explanation_verdict": "", "correct_explanation": "",
+            }
+            base.update(over)
+            return json.dumps(base, ensure_ascii=False)
+
+        out = run(payload(source="صحيح البخاري: ١"))
+        check("valid retrieved citation is retained",
+              out["source"] == "صحيح البخاري: ١")
+
+        # Falsifiable: pre-fix returned the fabricated citation verbatim.
+        out = run(payload(source="صحيح مسلم 9999"))
+        check("fabricated citation is replaced by the top retrieved reference",
+              out["source"] == "صحيح البخاري 1")
+
+        out = run(payload(correct_explanation=_RAG02_VERIFY_MATN))
+        check("grounded correct_explanation is retained",
+              out["correct_explanation"] == _RAG02_VERIFY_MATN)
+
+        # Falsifiable: pre-fix returned the ungrounded explanation verbatim.
+        out = run(payload(correct_explanation=_RAG02_UNSAFE_CLAIM))
+        check("ungrounded correct_explanation is neutralized",
+              out["correct_explanation"] == "")
+
+        out = run(payload(text_status="ممتاز", danger_level="خطر شديد",
+                          explanation_status="ربما"))
+        check("invalid text_status falls back to غير موجود",
+              out["text_status"] == "غير موجود")
+        check("invalid danger_level falls back to منخفضة",
+              out["danger_level"] == "منخفضة")
+        check("invalid explanation_status falls back to لا يوجد",
+              out["explanation_status"] == "لا يوجد")
+
+        verdict = "الشرح موافق لأن النص يثبت أن ثواب العمل بالنيات"
+        out = run(payload(explanation_verdict=verdict))
+        check("explanation_verdict passes through (evaluative field, by design)",
+              out["explanation_verdict"] == verdict)
+
+        out = run(payload(is_truncated="لا", missing_part="مزعوم",
+                          full_text="نص مزعوم"))
+        check("deterministic truncation overrides model output",
+              out["is_truncated"] is True
+              and out["full_text"] == _RAG02_VERIFY_MATN)
+        check("deterministic missing part overrides model output",
+              out["missing_part"] != "مزعوم")
+
+        out = run(payload(is_truncated="نعم", missing_part="جزء",
+                          full_text="نص كامل مزعوم"), text="الدين النصيحة")
+        check("non-firing truncation case keeps the model values",
+              out["is_truncated"] is True and out["missing_part"] == "جزء"
+              and out["full_text"] == "نص كامل مزعوم")
+
+        # Falsifiable: pre-fix returned text_status صحيح with no evidence.
+        out = run(payload(text_status="صحيح", source="صحيح البخاري 1",
+                          correct_explanation=_RAG02_VERIFY_MATN), res=[])
+        check("empty retrieval forces a safe verdict",
+              out["text_status"] == "غير موجود")
+        check("empty retrieval yields an empty source", out["source"] == "")
+        check("empty retrieval cannot ground prose",
+              out["correct_explanation"] == "")
+
+        out = run("not json", text="الدين النصيحة")
+        check("malformed JSON yields the safe defaults",
+              out["text_status"] == "غير موجود"
+              and out["danger_level"] == "منخفضة"
+              and out["explanation_status"] == "لا يوجد")
+        check("malformed JSON keeps is_truncated boolean",
+              isinstance(out["is_truncated"], bool))
+
+        out = run(payload(source="صحيح البخاري: ١",
+                          correct_explanation=_RAG02_VERIFY_MATN))
+        check("verify response exposes exactly the 11 contract keys",
+              set(out) == {
+                  "text_status", "is_truncated", "missing_part", "full_text",
+                  "source", "danger_level", "explanation_status",
+                  "explanation_verdict", "correct_explanation",
+                  "input_text", "input_explanation",
+              })
+        check("is_truncated is bool; all other values are strings",
+              isinstance(out["is_truncated"], bool)
+              and all(isinstance(out[k], str) for k in out
+                      if k != "is_truncated"))
+    finally:
+        V._dual_search = orig_search
+
+
+def test_rag02_ground_text_wrapper_and_chat_path() -> None:
+    print("\n[26] RAG-02 ground_text wrapper and unchanged chat path")
+    index, chunks = _gen_corpus()
+    retrieved = [{
+        "id": "g0", "source": "fiqh", "reference": "مرجع",
+        "original_text": "محتوى الفقه في الطهارة", "score": 0.9,
+    }]
+    kept = "محتوى الفقه في الطهارة"
+    rejected = "غزوة بدر كانت في شهر شوال."
+
+    check("wrapper is behaviour-identical with refusal=None (kept text)",
+          P.ground_text(kept, retrieved, chunks)
+          == P._ground_answer(kept, retrieved, chunks))
+    check("wrapper is behaviour-identical with refusal=None (rejected text)",
+          P.ground_text(rejected, retrieved, chunks)
+          == P._ground_answer(rejected, retrieved, chunks))
+    check("wrapper maps total rejection to the caller refusal",
+          P.ground_text(rejected, retrieved, chunks, refusal="س") == "س")
+    check("wrapper never rewrites kept text",
+          P.ground_text(kept, retrieved, chunks, refusal="س") == kept)
+
+    orig_embed = P.embed_text
+    orig_rewrite = P._rewrite_query
+    orig_ground = P._ground_answer
+    calls: dict = {"n": 0}
+    try:
+        P.embed_text = lambda text, client: [1.0, 0.0, 0.0]
+        P._rewrite_query = lambda query, client: []
+
+        def recorder(answer, retrieved, corpus_chunks=None):
+            calls["n"] += 1
+            calls["answer"] = answer
+            return "SENTINEL"
+
+        P._ground_answer = recorder
+        chat = _FakeChat({}, "محتوى الفقه في الطهارة (مصدر 1).")
+        out = P.generate("زقزق", index, chunks, chat)
+    finally:
+        P.embed_text = orig_embed
+        P._rewrite_query = orig_rewrite
+        P._ground_answer = orig_ground
+    check("generate still routes through _ground_answer directly",
+          calls["n"] == 1)
+    check("chat answer is _ground_answer's return value",
+          out["answer"] == "SENTINEL")
+    check("chat grounding receives the freshly generated answer",
+          calls.get("answer") == "محتوى الفقه في الطهارة (مصدر 1).")
+
+
+# ---------------------------------------------------------------------------
 
 def main() -> None:
     test_rrf_sem_signal()
@@ -1149,6 +1866,17 @@ def main() -> None:
     test_variant_suffix_order()
     test_p5v5_grounding_policy()
     test_grounding_curated_alias()
+    test_refusal_prefix_grounding()
+    test_bm25_single_flight()
+    test_bm25_failure_recovery()
+    test_bm25_tracing_ownership()
+    test_bm25_grounding_reuse()
+    test_r2_startup_prewarm()
+    test_r2_prewarm_failure()
+    test_r2_lifecycle_repeat_and_shutdown()
+    test_rag02_tafsir_grounding()
+    test_rag02_verify_validation()
+    test_rag02_ground_text_wrapper_and_chat_path()
     print(f"\n[offline_tests] {_PASS} passed, {_FAIL} failed")
     sys.exit(1 if _FAIL else 0)
 
