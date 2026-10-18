@@ -1,0 +1,13 @@
+# Runtime dependencies of model_api.py (top-level overview, unpinned).
+#
+# Canonical install source: model_api_requirements.lock — the committed,
+# complete pinned freeze of the working service environment (Python 3.14).
+# The service also imports tiktoken, tqdm, and PyArabic at startup (via
+# src/embeddings/embedder.py and src/nlp/preprocessor.py); the unpinned list
+# below is NOT sufficient on its own.  Install from the repository root:
+#   pip install -r src/rag/model_api_requirements.lock
+fastapi
+uvicorn
+openai
+faiss-cpu
+python-dotenv

@@ -36,7 +36,7 @@ basira-ai/
 │   ├── embeddings/        # Text embedding generation
 │   ├── vector_db/         # FAISS / Chroma vector store
 │   └── rag/               # RAG pipeline & chatbot logic
-├── notebooks/             # Exploration & experimentation
+├── BackEnd/               # Node/Express API (calls the RAG service)
 ├── docs/                  # Documentation & reports
 ├── data/                  # Gitignored — stored on Google Drive
 ├── requirements.txt
@@ -65,7 +65,7 @@ basira-ai/
 | NLP        | CAMeL Tools, NLTK, PyArabic          |
 | Embeddings | Sentence Transformers                |
 | Vector DB  | FAISS / Chroma                       |
-| RAG        | LangChain + LLM                      |
+| RAG        | OpenAI models (direct API client)    |
 | Backend    | FastAPI                              |
 | Frontend   | React                                |
 | Security   | Penetration Testing + SOC Monitoring |

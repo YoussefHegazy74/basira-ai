@@ -1,6 +1,7 @@
 const messageService = require("./message.service");
 const HttpStatus = require("../utils/HttpStatusText.js");
 const asyncWrapper = require("../middleware/Async_wrapper.js");
+const crypto = require("node:crypto");
 
 // send message (user or guest)
 const sendMessage = asyncWrapper(async (req, res, next) => {
@@ -21,7 +22,7 @@ const sendMessage = asyncWrapper(async (req, res, next) => {
     userId: req.user?._id,
     conversationId: req.body.conversationId,
     content: req.body.content,
-    chat_history: req.body.chat_history ?? req.body.chatHistory,
+    chatHistory: req.body.chat_history ?? req.body.chatHistory,
     guestKey,
   });
 

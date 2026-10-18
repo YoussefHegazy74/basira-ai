@@ -37,5 +37,7 @@ chroma_db/
 !data/raw/**
 !data/raw/*.json
 
-# Backend 
-Backend/node_modules/
+# BackEnd
+BackEnd/node_modules/
+!BackEnd/package.json
+!BackEnd/package-lock.json

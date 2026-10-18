@@ -31,12 +31,24 @@ def chunk_record(record: dict) -> dict:
             - id:            same as input record
             - source:        same as input record
             - reference:     same as input record
-            - original_text: the raw arabic_text
+            - original_text: the raw arabic_text (full isnad+matn for hadith)
             - clean_text:    preprocessed tokens rejoined as a string
+                             (matn-only for hadith when available)
             - metadata:      same as input record
     """
     arabic_text = record.get('arabic_text', '')
-    processed = preprocess(arabic_text)
+    metadata = record.get('metadata', {})
+
+    # For hadith records: if a separate matn exists in metadata,
+    # compute clean_text from the matn only so the embedding focuses
+    # on the Prophet's words rather than the narrator chain.
+    text_for_embedding = arabic_text
+    if record.get('source') == 'hadith' and isinstance(metadata, dict):
+        matn = metadata.get('matn', '')
+        if matn and matn.strip():
+            text_for_embedding = matn
+
+    processed = preprocess(text_for_embedding)
     clean_text = ' '.join(processed['tokens_clean'])
 
     return {
@@ -45,7 +57,7 @@ def chunk_record(record: dict) -> dict:
         'reference': record['reference'],
         'original_text': arabic_text,
         'clean_text': clean_text,
-        'metadata': record.get('metadata', {}),
+        'metadata': metadata,
     }
 
 

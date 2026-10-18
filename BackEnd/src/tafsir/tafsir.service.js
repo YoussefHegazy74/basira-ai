@@ -1,4 +1,4 @@
-const AppError = require("../utils/appError.js");
+const AppError = require("../utils/AppError.js");
 const HttpStatus = require("../utils/HttpStatusText.js");
 const usageService = require("../usage/usage.service.js");
 ///talk to model
@@ -28,7 +28,7 @@ const tafsir = async (ayah, userId, guestKey) => {
     throw new AppError(400, "Ayah is required", HttpStatus.BAD_REQUEST);
   }
   if (!userId) {
-    return await gusetTafsir(ayah, userId, null);
+    return await gusetTafsir(ayah, userId, guestKey);
   }
   return await userTafsir(ayah, userId, guestKey);
 };
