@@ -40,8 +40,9 @@ const register = async ({
   passwordconfirm,
 }) => {
   if (await User.exists({ email })) {
-    await pendingUserModel.deleteMany({ email });
+    throw new AppError(409, "Email already exists", HttpStatus.FAIL);
   }
+  await pendingUserModel.deleteMany({ email });
   const verificationToken = generateVerificationCode();
   const tempUser = await pendingUserModel.create({
     firstName,

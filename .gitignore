@@ -39,3 +39,5 @@ chroma_db/
 
 # Backend 
 Backend/node_modules/
+!BackEnd/package.json
+!BackEnd/package-lock.json

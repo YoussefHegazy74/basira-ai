@@ -32,7 +32,12 @@ const limiter = rateLimit({
 app.use(cookieParser());
 app.use(helmet());
 app.use(limiter);
-app.use(cors());
+app.use(
+  cors({
+    origin: true,
+    credentials: true,
+  }),
+);
 app.use(morgan("dev"));
 app.use(express.json());
 
