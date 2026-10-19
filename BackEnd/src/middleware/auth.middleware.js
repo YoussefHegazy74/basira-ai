@@ -1,7 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { promisify } = require("util");
 const User = require("../user/user.model.js");
-const AppError = require("../utils/appError.js");
+const AppError = require("../utils/AppError.js");
 const HttpStatusText = require("../utils/HttpStatusText.js");
 
 // ===== Get token from cookie OR Authorization header =====

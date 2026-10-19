@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 const Conversation = require("../conversation/conversation.model.js");
 const Message = require("../message/message.model.js");
-const AppError = require("../utils/appError.js");
+const AppError = require("../utils/AppError.js");
 const HttpStatus = require("../utils/HttpStatusText.js");
 
 /// get conversation that belongs to this user (404 if not found or not his)

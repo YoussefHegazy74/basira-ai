@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 const Message = require("../message/message.model.js");
 const conversationService = require("../conversation/conversation.service.js");
 const UsageService = require("../usage/usage.service.js");
-const AppError = require("../utils/appError.js");
+const AppError = require("../utils/AppError.js");
 const HttpStatus = require("../utils/HttpStatusText.js");
 
 /// constants
