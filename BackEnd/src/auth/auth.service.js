@@ -81,7 +81,6 @@ const login = async (userData) => {
   const token = signToken(user._id);
   user.isActive = true;
   user.expiresAt = undefined;
-  user.password = undefined;
   await user.save({ validateBeforeSave: false });
   return { token };
 };
@@ -94,7 +93,7 @@ const forgotPassword = async (req, res) => {
   }
   const resetToken = user.createPasswordResetToken();
   await user.save({ validateBeforeSave: false });
-  const resetURL = `${process.env.BASE_URL}/auth/resetpassword/${resetToken}`;
+  const resetURL = `${process.env.FRONTEND_URL}/auth/resetpassword/${resetToken}`;
 
   await sendEmail({
     to: user.email,
