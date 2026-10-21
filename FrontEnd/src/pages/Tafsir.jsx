@@ -33,10 +33,16 @@ function Tafsir() {
     }
   }
 
+  function handleInputKeyDown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleSubmit(event);
+    }
+  }
+
   return (
     <main className="service-page">
       <div className="container service-page-content">
-        <span className="section-label">Tafsir</span>
         <h1>التفسير</h1>
         <p className="page-description">
           ابحث عن الآية التي تريد معرفة تفسيرها.
@@ -62,6 +68,7 @@ function Tafsir() {
               onChange={function (event) {
                 setAyah(event.target.value);
               }}
+              onKeyDown={handleInputKeyDown}
               placeholder="اكتب الآية هنا..."
               rows="5"
               required
