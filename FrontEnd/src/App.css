@@ -2275,3 +2275,56 @@
 
 /* --------------------------- */
 
+
+.auth-password-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.auth-password-wrapper input {
+  width: 100%;
+  padding-left: 48px;
+}
+
+.auth-password-toggle {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 32px;
+  height: 34px;
+  padding: 0;
+
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #718077;
+
+  font-size: 18px;
+  cursor: pointer;
+
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.auth-password-toggle:hover {
+  color: #287647;
+  background-color: #edf5ef;
+}
+
+.auth-password-toggle:focus-visible {
+  outline: 2px solid #287647;
+  outline-offset: 2px;
+}
+
+.auth-password-toggle i {
+  pointer-events: none;
+}
