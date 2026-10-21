@@ -48,7 +48,12 @@ function Services() {
         <div className="services-grid">
           {services.map(function (service, index) {
             return (
-              <article className="service-card" key={service.title}>
+              <Link
+                className="service-card"
+                key={service.title}
+                to={service.link}
+                aria-label={`${service.title} - ${service.action}`}
+              >
                 <div className="card-top">
                   <span className="service-icon">
                     <i className={`bi ${service.icon}`}></i>
@@ -60,13 +65,14 @@ function Services() {
                 </div>
 
                 <h3>{service.title}</h3>
+
                 <p>{service.description}</p>
 
-                <Link className="service-link" to={service.link}>
+                <span className="service-link">
                   {service.action}
                   <i className="bi bi-arrow-left"></i>
-                </Link>
-              </article>
+                </span>
+              </Link>
             );
           })}
         </div>
