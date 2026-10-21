@@ -41,3 +41,7 @@ chroma_db/
 BackEnd/node_modules/
 !BackEnd/package.json
 !BackEnd/package-lock.json
+
+# FrontEnd
+FrontEnd/node_modules/
+FrontEnd/dist/

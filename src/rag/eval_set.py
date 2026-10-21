@@ -232,13 +232,15 @@ EVAL_QUESTIONS = [
         "category": "quran_tafsir",
         "question": "ما قصة أصحاب الكهف؟",
         "answerable": True,
-        "evidence_ids": ["quran_18_9", "tafsir_ibnkathir_18_10"],
+        "evidence_ids": ["quran_18_9", "tafsir_ibnkathir_18_10", "quran_18_13"],
         "required_facts": ["أصحاب الكهف والرقيم", "فتية آمنوا بربهم"],
         "answer_criteria": "يشير إلى القصة ومصدرها القرآني/التفسيري",
         "sem_proxy_id": "tafsir_ibnkathir_18_10",
         "notes": (
             "quran_18_9: 'أم حسبت أن أصحاب الكهف والرقيم كانوا من آياتنا عجبا'. "
             "tafsir_ibnkathir_18_10: 'هذا اخبار عن قصه اصحاب... اهل الكهف والرقيم'. "
+            "quran_18_13: 'إنهم فتية آمنوا بربهم وزدناهم هدى' supplies the second "
+            "required fact; the two earlier evidence chunks do not contain it. "
             "Query token أصحاب matches tafsir/sira spelling; quran chunk uses the "
             "dagger-alef rasm ('اصحب') -> lexical gap covered by كهف/الرقيم tokens."
         ),

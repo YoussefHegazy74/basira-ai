@@ -7,6 +7,7 @@ text-embedding-3-small model via the OpenAI API.
 
 from __future__ import annotations
 
+import math
 import pickle
 from pathlib import Path
 
@@ -84,9 +85,10 @@ def embed_chunks(
 
     Calls the OpenAI embeddings API in batches for efficiency and shows
     a tqdm progress bar.  Long texts are truncated via tiktoken to stay
-    within the OpenAI 8192-token limit.  If an entire batch fails, every
-    chunk in that batch receives a zero-vector embedding and a warning is
-    logged so the run can continue.
+    within the OpenAI 8192-token limit.  The function fails closed: an API
+    error, empty input, missing/malformed vector, wrong vector count or
+    wrong dimension raises RuntimeError instead of writing zero vectors.
+    Callers must not build an index from a partial embedding run.
 
     Args:
         chunks:      List of chunk dicts, each containing a 'clean_text' key.
@@ -98,10 +100,13 @@ def embed_chunks(
         The same list of chunk dicts, each now including an 'embedding' key
         with a list-of-floats value.
     """
+    if batch_size <= 0:
+        raise ValueError("batch_size must be greater than zero")
+    if start_batch < 0:
+        raise ValueError("start_batch must be non-negative")
+
     total = len(chunks)
     embedded_count = 0
-    skipped_empty = 0
-    failed_count = 0
     batch_indices = list(range(0, total, batch_size))
     total_batches = len(batch_indices)
 
@@ -126,9 +131,10 @@ def embed_chunks(
             if not text.strip():
                 text = truncate_to_tokens(chunk.get("original_text") or "")
             if not text.strip():
-                skipped_empty += 1
-                chunk["embedding"] = [0.0] * DIM
-                continue
+                raise RuntimeError(
+                    f"Chunk '{chunk.get('id', '?')}' has no embeddable text; "
+                    "aborting to prevent a partial/zero-vector index."
+                )
             texts.append(text)
             valid_chunks.append(chunk)
 
@@ -141,27 +147,44 @@ def embed_chunks(
                 model=EMBEDDING_MODEL,
             )
 
-            for chunk, item in zip(valid_chunks, response.data):
-                chunk["embedding"] = item.embedding
+            response_data = list(response.data)
+            if len(response_data) != len(valid_chunks):
+                raise RuntimeError(
+                    f"Embedding API returned {len(response_data)} vectors for "
+                    f"{len(valid_chunks)} inputs in batch {batch_num}."
+                )
+
+            vectors = [list(item.embedding) for item in response_data]
+            for vector in vectors:
+                if len(vector) != DIM:
+                    raise RuntimeError(
+                        f"Embedding API returned dimension {len(vector)}; "
+                        f"expected {DIM}."
+                    )
+                if not all(
+                    isinstance(value, (int, float)) and math.isfinite(value)
+                    for value in vector
+                ):
+                    raise RuntimeError(
+                        "Embedding API returned a malformed/non-numeric vector."
+                    )
+
+            # Commit this batch only after every vector validates.
+            for chunk, vector in zip(valid_chunks, vectors):
+                chunk["embedding"] = vector
 
             embedded_count += len(valid_chunks)
 
         except Exception as e:
-            # Assign zero vectors so the run can continue
-            for chunk in valid_chunks:
-                chunk["embedding"] = [0.0] * DIM
-                failed_count += 1
-                print(
-                    f"\n⚠️  Batch {batch_num} failed — chunk '{chunk.get('id', '?')}' "
-                    f"got zero vector. Error: {e}"
-                )
+            # Fail closed: callers must not save/build an index from a partial
+            # embedding run.  Preserve the original exception as the cause.
+            raise RuntimeError(
+                f"Embedding batch {batch_num} failed for {len(valid_chunks)} "
+                "chunks; aborting to prevent a partial/zero-vector index."
+            ) from e
 
     dim = len(chunks[0]["embedding"]) if chunks else 0
     print(f"[embedder] Embedded {embedded_count:,} chunks (dim={dim})")
-    if skipped_empty:
-        print(f"[embedder] Skipped {skipped_empty:,} empty chunks (zero vector)")
-    if failed_count:
-        print(f"[embedder] Failed {failed_count:,} chunks (zero vector due to API error)")
     return chunks
 
 
