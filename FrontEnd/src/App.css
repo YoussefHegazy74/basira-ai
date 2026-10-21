@@ -2275,6 +2275,7 @@
 
 /* --------------------------- */
 
+/* Password show / hide icon - SignIn & SignUp */
 
 .auth-password-wrapper {
   position: relative;
@@ -2327,4 +2328,701 @@
 
 .auth-password-toggle i {
   pointer-events: none;
+}
+
+
+/* ================================
+   Navbar Bots Dropdown
+   Basira AI Dark Green Theme
+================================ */
+
+.nav-bots-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Bots Toggle Button */
+
+.nav-bots-toggle {
+  width: 43px;
+  height: 43px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid #b5d2c8;
+  border-radius: 12px;
+
+  background: #e0ece6;
+  color: #195b4b;
+
+  font-size: 21px;
+  cursor: pointer;
+
+  transition:
+    background 0.25s ease,
+    color 0.25s ease,
+    transform 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.nav-bots-toggle:hover,
+.nav-bots-toggle.active {
+  background: #195b4b;
+  border-color: #195b4b;
+  color: #ffffff;
+  box-shadow: 0 5px 16px rgba(25, 91, 75, 0.24);
+}
+
+.nav-bots-toggle:active {
+  transform: scale(0.95);
+}
+
+.nav-bots-toggle:focus-visible {
+  outline: 2px solid #195b4b;
+  outline-offset: 3px;
+}
+
+/* Dropdown Box */
+
+.nav-bots-dropdown {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+
+  width: 330px;
+  max-width: calc(100vw - 30px);
+  padding: 16px;
+
+  background: #ffffff;
+  border: 1px solid #d1e2da;
+  border-radius: 18px;
+
+  box-shadow: 0 16px 45px rgba(22, 59, 48, 0.16);
+
+  z-index: 2000;
+  animation: botsDropdownShow 0.2s ease-out;
+}
+
+@keyframes botsDropdownShow {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Dropdown Header */
+
+.bots-dropdown-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 4px 2px 15px;
+  margin-bottom: 10px;
+
+  border-bottom: 1px solid #e0e9e4;
+}
+
+.bots-header-icon {
+  width: 45px;
+  height: 45px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  border-radius: 13px;
+
+  background: #e0ece6;
+  color: #195b4b;
+
+  font-size: 22px;
+}
+
+.bots-dropdown-header h3 {
+  margin: 0 0 4px;
+
+  font-size: 16px;
+  font-weight: 700;
+
+  color: #193e33;
+}
+
+.bots-dropdown-header p {
+  margin: 0;
+
+  font-size: 12px;
+  color: #71847b;
+}
+
+/* Bot Links */
+
+.bots-dropdown-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.bot-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+
+  padding: 11px 9px;
+  border-radius: 12px;
+
+  color: #24463a;
+  text-decoration: none;
+
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.bot-dropdown-item:hover,
+.bot-dropdown-item.active {
+  background: #eaf3ee;
+  color: #195b4b;
+}
+
+.bot-dropdown-item:hover {
+  transform: translateX(-3px);
+}
+
+.bot-item-icon {
+  width: 42px;
+  height: 42px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  border-radius: 12px;
+
+  background: #e0ece6;
+  color: #195b4b;
+
+  font-size: 19px;
+
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.bot-dropdown-item:hover .bot-item-icon,
+.bot-dropdown-item.active .bot-item-icon {
+  background: #195b4b;
+  color: #ffffff;
+}
+
+.bot-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  flex: 1;
+  min-width: 0;
+}
+
+.bot-item-info strong {
+  font-size: 13px;
+  font-weight: 700;
+  color: inherit;
+}
+
+.bot-item-info small {
+  font-size: 11px;
+  color: #71847b;
+  line-height: 1.5;
+}
+
+.bot-item-arrow {
+  font-size: 14px;
+  color: #668277;
+  opacity: 0.8;
+
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.bot-dropdown-item:hover .bot-item-arrow {
+  color: #195b4b;
+  transform: translate(-2px, -2px);
+}
+
+/* Dropdown Footer */
+
+.bots-dropdown-footer {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  margin-top: 10px;
+  padding: 12px 8px 2px;
+
+  border-top: 1px solid #e0e9e4;
+
+  color: #195b4b;
+  text-decoration: none;
+
+  font-size: 13px;
+  font-weight: 700;
+
+  transition:
+    color 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.bots-dropdown-footer:hover {
+  color: #103f33;
+  opacity: 0.9;
+}
+
+/* Responsive */
+
+@media (max-width: 576px) {
+  .nav-bots-dropdown {
+    position: fixed;
+    top: 78px;
+    right: 15px;
+
+    width: 330px;
+    max-width: calc(100vw - 30px);
+  }
+
+  .nav-bots-toggle {
+    width: 39px;
+    height: 39px;
+    font-size: 19px;
+  }
+}
+
+/* ================================
+   Navbar Profile Dropdown
+   Basira AI Theme
+================================ */
+
+.nav-profile-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+/* Profile Toggle */
+
+.nav-profile-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+
+  min-height: 43px;
+  max-width: 210px;
+  padding: 5px 11px;
+
+  border: 1px solid #b5d2c8;
+  border-radius: 12px;
+
+  background: #e0ece6;
+  color: #195b4b;
+
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+
+  cursor: pointer;
+
+  transition:
+    background 0.25s ease,
+    color 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+}
+
+.nav-profile-toggle:hover,
+.nav-profile-toggle.active {
+  background: #195b4b;
+  border-color: #195b4b;
+  color: #ffffff;
+  box-shadow: 0 5px 16px rgba(25, 91, 75, 0.2);
+}
+
+.nav-profile-toggle > i:first-child {
+  font-size: 24px;
+  flex-shrink: 0;
+}
+
+.nav-profile-avatar {
+  width: 31px;
+  height: 31px;
+  flex-shrink: 0;
+
+  border-radius: 50%;
+  border: 2px solid #ffffff;
+
+  object-fit: cover;
+}
+
+.nav-profile-toggle-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.nav-profile-chevron {
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* Profile Dropdown Box */
+
+.nav-profile-dropdown {
+  position: absolute;
+  top: calc(100% + 14px);
+  right: 0;
+
+  width: 315px;
+  max-width: calc(100vw - 30px);
+  padding: 12px;
+
+  background: #ffffff;
+  border: 1px solid #d1e2da;
+  border-radius: 18px;
+
+  box-shadow: 0 16px 45px rgba(22, 59, 48, 0.16);
+
+  z-index: 2000;
+  animation: profileDropdownShow 0.2s ease-out;
+}
+
+@keyframes profileDropdownShow {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* User Information Section */
+
+.profile-dropdown-user {
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 12px 10px;
+
+  border: none;
+  border-radius: 13px;
+
+  background: transparent;
+  color: #193e33;
+
+  font-family: inherit;
+  text-align: right;
+
+  cursor: pointer;
+
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.profile-dropdown-user:hover {
+  background: #eaf3ee;
+}
+
+.profile-dropdown-avatar {
+  width: 53px;
+  height: 53px;
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+
+  border: 2px solid #d1e2da;
+  border-radius: 50%;
+
+  background: #e0ece6;
+  color: #195b4b;
+
+  font-size: 27px;
+}
+
+.profile-dropdown-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 50%;
+}
+
+.profile-dropdown-info {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+
+  flex: 1;
+  min-width: 0;
+}
+
+.profile-dropdown-info strong {
+  max-width: 100%;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  color: #193e33;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.profile-dropdown-info small {
+  max-width: 100%;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  color: #71847b;
+  font-size: 11px;
+  direction: ltr;
+  text-align: right;
+}
+
+.profile-dropdown-view {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  margin-top: 3px;
+
+  color: #195b4b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.profile-dropdown-user:hover .profile-dropdown-view {
+  color: #103f33;
+}
+
+/* Divider */
+
+.profile-dropdown-divider {
+  height: 1px;
+  margin: 8px 2px;
+
+  background: #e0e9e4;
+}
+
+/* Logout Button */
+
+.profile-dropdown-logout {
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+  gap: 11px;
+
+  padding: 10px;
+
+  border: none;
+  border-radius: 12px;
+
+  background: transparent;
+  color: #8d3737;
+
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: right;
+
+  cursor: pointer;
+
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.profile-dropdown-logout:hover {
+  background: #faeeee;
+  color: #a12f2f;
+}
+
+.profile-logout-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 10px;
+
+  background: #f7e5e5;
+  color: #8d3737;
+
+  font-size: 17px;
+
+  transition:
+    background 0.2s ease,
+    color 0.2s ease;
+}
+
+.profile-dropdown-logout:hover .profile-logout-icon {
+  background: #a12f2f;
+  color: #ffffff;
+}
+
+/* Responsive */
+
+@media (max-width: 576px) {
+  .nav-profile-dropdown {
+    position: fixed;
+    top: 78px;
+    right: 15px;
+
+    width: 315px;
+    max-width: calc(100vw - 30px);
+  }
+
+  .nav-profile-toggle {
+    min-height: 39px;
+    max-width: 145px;
+    gap: 6px;
+    padding: 4px 8px;
+
+    font-size: 12px;
+  }
+
+  .nav-profile-toggle > i:first-child {
+    font-size: 22px;
+  }
+
+  .nav-profile-avatar {
+    width: 28px;
+    height: 28px;
+  }
+
+  .nav-profile-chevron {
+    font-size: 10px;
+  }
+}
+
+/* ================================
+   Chat History Actions
+   Basira AI Theme
+================================ */
+
+.chat-history-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-width: 0;
+  padding: 3px;
+  border-radius: 12px;
+  transition: background 0.2s ease;
+}
+
+.chat-history-row:hover,
+.chat-history-row.active {
+  background: #eaf3ee;
+}
+
+.chat-history-row .chat-history-item {
+  flex: 1;
+  width: 0;
+  min-width: 0;
+  margin: 0;
+}
+
+.chat-history-row .chat-history-item span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.chat-history-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+
+  width: 30px;
+  height: 30px;
+  padding: 0;
+
+  border: 1px solid transparent;
+  border-radius: 8px;
+
+  background: transparent;
+  color: #527568;
+
+  font-size: 14px;
+  cursor: pointer;
+
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    border-color 0.2s ease;
+}
+
+.chat-history-action.rename:hover {
+  background: #d7e9df;
+  border-color: #b5d2c8;
+  color: #195b4b;
+}
+
+.chat-history-action.delete:hover {
+  background: #fae8e8;
+  border-color: #edcaca;
+  color: #a12f2f;
+}
+
+.chat-history-action:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-history-action:focus-visible {
+  outline: 2px solid #195b4b;
+  outline-offset: 2px;
+}
+
+@media (max-width: 576px) {
+  .chat-history-row {
+    gap: 2px;
+  }
+
+  .chat-history-action {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+  }
 }
