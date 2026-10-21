@@ -72,18 +72,34 @@ const register = async ({
 };
 //// log in
 const login = async (userData) => {
-  const user = await User.findOne({ email: userData.email }).select(
-    "+password",
-  );
+  const email = String(userData.email || "")
+    .trim()
+    .toLowerCase();
+  const user = await User.findOne({ email }).select("+password");
+
   if (!user || !(await user.correctPassword(userData.password))) {
     throw new AppError(401, "Incorrect email or password", HttpStatus.FAIL);
   }
+
   const token = signToken(user._id);
+
   user.isActive = true;
   user.expiresAt = undefined;
+
   await user.save({ validateBeforeSave: false });
-  return { token };
+
+  return {
+    token,
+    user: {
+      id: String(user._id),
+      firstName: user.firstName,
+      lastName: user.lastName,
+      email: user.email,
+      role: user.role === "admin" ? "admin" : "user",
+    },
+  };
 };
+
 const forgotPassword = async (req, res) => {
   ///1 check if user exist
 
