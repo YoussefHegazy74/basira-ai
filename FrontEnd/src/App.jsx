@@ -1,5 +1,6 @@
 
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import Profile from "./pages/Profile";
 
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
@@ -81,6 +82,7 @@ function AppLayout() {
             </AdminRoute>
           }
         />
+        <Route path="/profile" element={<Profile />} />
 
         <Route path="/chat" element={<Chat />} />
         <Route path="/verify" element={<Verify />} />
