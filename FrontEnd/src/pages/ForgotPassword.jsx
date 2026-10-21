@@ -1,17 +1,58 @@
 
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import api from "../services/api";
+import { useAuth } from "../context/AuthContext";
 import "./ForgotPassword.css";
 
+function maskEmail(email) {
+  if (!email || !email.includes("@")) return "";
+
+  const [name, ...domainParts] = email.split("@");
+  const domain = domainParts.join("@");
+
+  if (name.length <= 2) {
+    return `${name[0] || ""}${"*".repeat(
+      Math.max(name.length - 1, 0)
+    )}@${domain}`;
+  }
+
+  return `${name[0]}${"*".repeat(name.length - 2)}${
+    name[name.length - 1]
+  }@${domain}`;
+}
+
 function ForgotPassword() {
+  const { user } = useAuth();
+  const navigate = useNavigate();
+
+  const loggedInEmail = user?.email || user?.user?.email || "";
+  const isLoggedIn = Boolean(loggedInEmail);
+
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (isLoggedIn) {
+      setEmail(loggedInEmail.trim().toLowerCase());
+    } else {
+      setEmail("");
+    }
+  }, [isLoggedIn, loggedInEmail]);
+
   async function handleSubmit(event) {
     event.preventDefault();
+
+    const emailToSend = isLoggedIn
+      ? loggedInEmail.trim().toLowerCase()
+      : email.trim().toLowerCase();
+
+    if (!emailToSend) {
+      setError("من فضلك اكتب البريد الإلكتروني المرتبط بحسابك.");
+      return;
+    }
 
     setMessage("");
     setError("");
@@ -19,7 +60,7 @@ function ForgotPassword() {
 
     try {
       const response = await api.post("/auth/forgotpassword", {
-        email: email.trim().toLowerCase(),
+        email: emailToSend,
       });
 
       setMessage(
@@ -36,15 +77,20 @@ function ForgotPassword() {
     }
   }
 
+  const returnPath = isLoggedIn ? "/profile" : "/signin";
+  const returnText = isLoggedIn
+    ? "العودة للبروفايل"
+    : "العودة لتسجيل الدخول";
+
   return (
     <main className="forgot-page" dir="rtl">
       <div className="forgot-glow forgot-glow-one"></div>
       <div className="forgot-glow forgot-glow-two"></div>
 
       <section className="forgot-card">
-        <Link to="/signin" className="forgot-back">
+        <Link to={returnPath} className="forgot-back">
           <i className="bi bi-arrow-right"></i>
-          <span>العودة لتسجيل الدخول</span>
+          <span>{returnText}</span>
         </Link>
 
         <div className="forgot-brand">
@@ -63,8 +109,9 @@ function ForgotPassword() {
         <h1>نسيت كلمة المرور؟</h1>
 
         <p className="forgot-description">
-          ولا يهمك، ده بيحصل. اكتب البريد الإلكتروني المرتبط بحسابك
-          وهنساعدك تستعيد الوصول لحسابك.
+          {isLoggedIn
+            ? "هنرسل رابط استعادة كلمة المرور إلى البريد الإلكتروني المرتبط بحسابك."
+            : "اكتب البريد الإلكتروني المرتبط بحسابك وهنساعدك تستعيد الوصول لحسابك."}
         </p>
 
         {error && (
@@ -90,21 +137,43 @@ function ForgotPassword() {
 
               <input
                 id="forgot-email"
-                type="email"
+                type={isLoggedIn ? "text" : "email"}
                 name="email"
-                placeholder="example@email.com"
-                value={email}
-                onChange={(event) => setEmail(event.target.value)}
+                placeholder="example@gmail.com"
+                value={
+                  isLoggedIn
+                    ? maskEmail(loggedInEmail)
+                    : email
+                }
+                onChange={(event) => {
+                  if (!isLoggedIn) {
+                    setEmail(event.target.value);
+                  }
+                }}
+                readOnly={isLoggedIn}
+                aria-readonly={isLoggedIn}
+                dir="ltr"
                 autoComplete="email"
                 required
                 disabled={loading}
+                className={isLoggedIn ? "forgot-email-readonly" : ""}
               />
+
+              {isLoggedIn && (
+                <i className="bi bi-lock-fill forgot-email-lock"></i>
+              )}
             </div>
+
+            {isLoggedIn && (
+              <p className="forgot-email-note">
+                البريد الإلكتروني مرتبط بحسابك ولا يمكن تغييره من هنا.
+              </p>
+            )}
 
             <button
               type="submit"
               className="forgot-submit"
-              disabled={loading}
+              disabled={loading || (isLoggedIn && !loggedInEmail)}
             >
               {loading ? (
                 <>
@@ -125,12 +194,9 @@ function ForgotPassword() {
           <button
             type="button"
             className="forgot-submit"
-            onClick={() => {
-              setMessage("");
-              setEmail("");
-            }}
+            onClick={() => navigate(returnPath)}
           >
-            إرسال طلب آخر
+            {returnText}
             <i className="bi bi-arrow-left"></i>
           </button>
         )}
@@ -138,8 +204,8 @@ function ForgotPassword() {
         <div className="forgot-help">
           <i className="bi bi-info-circle"></i>
           <span>
-            تأكد من كتابة البريد الإلكتروني الصحيح، وراجع مجلد الرسائل
-            غير المرغوب فيها (Spam) لو الرسالة موصلتش.
+            تأكد من إمكانية الوصول إلى بريدك الإلكتروني، وراجع مجلد الرسائل غير
+            المرغوب فيها (Spam) لو الرسالة موصلتش.
           </span>
         </div>
 
