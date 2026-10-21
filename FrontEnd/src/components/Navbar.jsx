@@ -54,10 +54,15 @@ function Navbar() {
         <div className="nav-auth">
           {!authLoading && user ? (
             <>
-              <span className="nav-user-name" title={user.email}>
+              <Link
+                to="/profile"
+                className="nav-user-name"
+                title="الملف الشخصي"
+                aria-label="فتح الملف الشخصي"
+              >
                 <i className="bi bi-person-circle"></i>
                 <span>{displayName}</span>
-              </span>
+              </Link>
 
               <button
                 type="button"
