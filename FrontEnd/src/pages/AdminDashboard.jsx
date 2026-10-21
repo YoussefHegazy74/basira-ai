@@ -272,7 +272,6 @@ function AdminDashboard() {
         <section className="admin-users-panel">
           <div className="admin-panel-heading">
             <div>
-              <span className="admin-section-label">USER MANAGEMENT</span>
               <h2>إدارة المستخدمين</h2>
               <p>عرض الحسابات والبحث بينها وتنفيذ إجراءات الإدارة.</p>
             </div>
@@ -497,14 +496,6 @@ function AdminDashboard() {
             </div>
           )}
         </section>
-
-        <div className="admin-footer-note">
-          <i className="bi bi-info-circle"></i>
-          <p>
-            عمليات الإدارة تُنفّذ من خلال السيرفر وتخضع لصلاحيات الحساب.
-            <Link to="/"> العودة إلى الصفحة الرئيسية</Link>
-          </p>
-        </div>
       </div>
     </main>
   );
