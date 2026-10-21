@@ -15,6 +15,7 @@ function SignIn() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   function handleChange(event) {
     const { name, value } = event.target;
@@ -62,7 +63,9 @@ function SignIn() {
       <section className="auth-card">
         <Link to="/" className="auth-logo">
           <i className="bi bi-eye-fill"></i>
-          <span>بصيرة <small>Basira AI</small></span>
+          <span>
+            بصيرة <small>Basira AI</small>
+          </span>
         </Link>
 
         <div className="auth-heading">
@@ -93,27 +96,43 @@ function SignIn() {
 
           <div className="auth-field">
             <label htmlFor="signin-password">كلمة المرور</label>
-            <input
-              id="signin-password"
-              type="password"
-              name="password"
-              autoComplete="current-password"
-              placeholder="أدخل كلمة المرور"
-              value={form.password}
-              onChange={handleChange}
-              required
-            />
+
+            <div className="auth-password-wrapper">
+              <input
+                id="signin-password"
+                type={showPassword ? "text" : "password"}
+                name="password"
+                autoComplete="current-password"
+                placeholder="أدخل كلمة المرور"
+                value={form.password}
+                onChange={handleChange}
+                required
+              />
+
+              <button
+                type="button"
+                className="auth-password-toggle"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={
+                  showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"
+                }
+                aria-pressed={showPassword}
+              >
+                <i
+                  className={`bi ${
+                    showPassword ? "bi-eye-slash" : "bi-eye"
+                  }`}
+                  aria-hidden="true"
+                ></i>
+              </button>
+            </div>
           </div>
 
           <div className="auth-form-extra">
             <Link to="/forgot-password">نسيت كلمة المرور؟</Link>
           </div>
 
-          <button
-            className="auth-submit"
-            type="submit"
-            disabled={loading}
-          >
+          <button className="auth-submit" type="submit" disabled={loading}>
             {loading ? "جارٍ تسجيل الدخول..." : "تسجيل الدخول"}
           </button>
         </form>
