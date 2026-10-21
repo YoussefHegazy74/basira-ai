@@ -38,12 +38,16 @@ function Verify() {
     }
   }
 
+  function handleInputKeyDown(event) {
+    if (event.key === "Enter" && !event.shiftKey) {
+      event.preventDefault();
+      handleSubmit(event);
+    }
+  }
+
   return (
     <main className="service-page">
       <div className="container service-page-content">
-        <span className="section-label">
-          Information Verification
-        </span>
 
         <h1>التحقق من المعلومات</h1>
 
@@ -76,6 +80,7 @@ function Verify() {
               onChange={function (event) {
                 setText(event.target.value);
               }}
+              onKeyDown={handleInputKeyDown}
               placeholder="اكتب أو الصق النص هنا..."
               rows={7}
               required
@@ -91,6 +96,7 @@ function Verify() {
               onChange={function (event) {
                 setExplanation(event.target.value);
               }}
+              onKeyDown={handleInputKeyDown}
               placeholder="أضف مصدر النص أو أي سياق يساعد في التحقق..."
               rows={3}
             />
