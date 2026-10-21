@@ -1,17 +1,13 @@
 
-import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Profile from "./pages/Profile";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
+import Profile from "./pages/Profile";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
-
 import AdminDashboard from "./pages/AdminDashboard";
-import { Navigate } from "react-router-dom";
-import { useAuth } from "./context/AuthContext";
 
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
-
 
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
@@ -24,7 +20,7 @@ import About from "./pages/About";
 import Services from "./pages/Services";
 
 import "./App.css";
-import { AuthProvider } from "./context/AuthContext";
+import { AuthProvider, useAuth } from "./context/AuthContext";
 
 function NotFound() {
   return (
@@ -34,6 +30,8 @@ function NotFound() {
     </main>
   );
 }
+
+// حماية صفحة الأدمن
 function AdminRoute({ children }) {
   const { user, authLoading } = useAuth();
 
@@ -57,6 +55,26 @@ function AdminRoute({ children }) {
   return children;
 }
 
+// منع المستخدم المسجل دخوله من فتح تسجيل الدخول أو إنشاء حساب
+function GuestRoute({ children }) {
+  const { user, authLoading } = useAuth();
+
+  if (authLoading) {
+    return (
+      <div className="admin-route-loading">
+        <span className="admin-spinner admin-spinner-large"></span>
+        <p>جارٍ التحقق من حالة تسجيل الدخول...</p>
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Navigate to="/" replace />;
+  }
+
+  return children;
+}
+
 function AppLayout() {
   return (
     <>
@@ -67,13 +85,31 @@ function AppLayout() {
         <Route path="/about" element={<About />} />
         <Route path="/services" element={<Services />} />
 
-        <Route path="/signin" element={<SignIn />} />
-        <Route path="/signup" element={<SignUp />} />
+        {/* صفحات تسجيل الدخول وإنشاء الحساب */}
+        <Route
+          path="/signin"
+          element={
+            <GuestRoute>
+              <SignIn />
+            </GuestRoute>
+          }
+        />
+
+        <Route
+          path="/signup"
+          element={
+            <GuestRoute>
+              <SignUp />
+            </GuestRoute>
+          }
+        />
 
         <Route
           path="/forgot-password"
           element={<ForgotPassword />}
         />
+
+        {/* صفحة الأدمن */}
         <Route
           path="/admin"
           element={
@@ -82,6 +118,7 @@ function AppLayout() {
             </AdminRoute>
           }
         />
+
         <Route path="/profile" element={<Profile />} />
 
         <Route path="/chat" element={<Chat />} />
@@ -92,8 +129,6 @@ function AppLayout() {
           path="/auth/resetpassword/:token"
           element={<ResetPassword />}
         />
-
-        {/* Admin Dashboard */}
 
         <Route path="*" element={<NotFound />} />
       </Routes>
