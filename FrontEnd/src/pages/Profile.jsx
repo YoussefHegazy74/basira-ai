@@ -1,6 +1,4 @@
 
-// src/pages/Profile.jsx
-
 import { useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
@@ -8,9 +6,21 @@ import api from "../services/api";
 import "./Profile.css";
 
 function Profile() {
-  const { user, logout } = useAuth();
+  const { user, setUser, logout } = useAuth();
   const navigate = useNavigate();
 
+  // بيانات الملف الشخصي
+  const [firstName, setFirstName] = useState(user?.firstName || "");
+  const [lastName, setLastName] = useState(user?.lastName || "");
+  const [email, setEmail] = useState(user?.email || "");
+
+  // إظهار وإخفاء نموذج تعديل الملف الشخصي
+  const [isEditingProfile, setIsEditingProfile] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState("");
+  const [profileSuccess, setProfileSuccess] = useState("");
+
+  // تغيير كلمة المرور
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -23,12 +33,9 @@ function Profile() {
   const [deactivating, setDeactivating] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
-  // أخطاء تغيير كلمة المرور
   const [currentPasswordError, setCurrentPasswordError] = useState("");
   const [formError, setFormError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-
-  // رسائل العمليات الأخرى
   const [pageError, setPageError] = useState("");
 
   if (!user) {
@@ -41,13 +48,137 @@ function Profile() {
     user.email ||
     "المستخدم";
 
-  function clearMessages() {
-    setCurrentPasswordError("");
-    setFormError("");
-    setSuccessMessage("");
-    setPageError("");
+  // فتح نموذج تعديل الملف الشخصي
+  function handleOpenProfileEdit() {
+    // تعبئة الحقول ببيانات الحساب الحالية
+    setFirstName(user.firstName || "");
+    setLastName(user.lastName || "");
+    setEmail(user.email || "");
+
+    setProfileError("");
+    setProfileSuccess("");
+    setIsEditingProfile(true);
   }
 
+  // إلغاء التعديل وإخفاء النموذج
+  function handleCancelProfileEdit() {
+    setFirstName(user.firstName || "");
+    setLastName(user.lastName || "");
+    setEmail(user.email || "");
+
+    setProfileError("");
+    setProfileSuccess("");
+    setIsEditingProfile(false);
+  }
+
+  // تعديل بيانات الحساب وحفظها
+  async function handleUpdateProfile(event) {
+    event.preventDefault();
+
+    setProfileError("");
+    setProfileSuccess("");
+
+    const cleanFirstName = firstName.trim();
+    const cleanLastName = lastName.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    if (!cleanFirstName || !cleanLastName || !cleanEmail) {
+      setProfileError(
+        "من فضلك املأ الاسم الأول واسم العائلة والبريد الإلكتروني."
+      );
+      return;
+    }
+
+    if (cleanFirstName.length > 50 || cleanLastName.length > 50) {
+      setProfileError("يجب ألا يزيد كل جزء من الاسم عن 50 حرفًا.");
+      return;
+    }
+
+    const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!emailPattern.test(cleanEmail)) {
+      setProfileError("من فضلك أدخل بريدًا إلكترونيًا صحيحًا.");
+      return;
+    }
+
+    const userId = user.id || user._id;
+
+    if (!userId) {
+      setProfileError(
+        "تعذر تحديد حساب المستخدم. سجّل الدخول مرة أخرى."
+      );
+      return;
+    }
+
+    setProfileLoading(true);
+
+    try {
+      const response = await api.patch(`/users/${userId}`, {
+        firstName: cleanFirstName,
+        lastName: cleanLastName,
+        email: cleanEmail,
+      });
+
+      const updatedUser = response.data?.data;
+
+      if (!updatedUser) {
+        throw new Error("لم يتم استلام بيانات الحساب بعد التحديث.");
+      }
+
+      // تحديث بيانات المستخدم في AuthContext
+      setUser({
+        ...user,
+        ...updatedUser,
+        id: updatedUser.id || updatedUser._id || userId,
+        firstName: updatedUser.firstName ?? cleanFirstName,
+        lastName: updatedUser.lastName ?? cleanLastName,
+        email: String(updatedUser.email ?? cleanEmail)
+          .trim()
+          .toLowerCase(),
+      });
+
+      // تحديث الحقول بالقيم المحفوظة
+      setFirstName(updatedUser.firstName ?? cleanFirstName);
+      setLastName(updatedUser.lastName ?? cleanLastName);
+      setEmail(
+        String(updatedUser.email ?? cleanEmail).trim().toLowerCase()
+      );
+
+      setProfileSuccess("تم تحديث بيانات حسابك بنجاح.");
+
+      // إخفاء نموذج التعديل بعد نجاح الحفظ
+      setIsEditingProfile(false);
+    } catch (error) {
+      const responseMessage =
+        error.response?.data?.message ||
+        error.response?.data?.error ||
+        "";
+
+      const normalizedMessage = String(responseMessage).toLowerCase();
+
+      if (
+        normalizedMessage.includes("duplicate") ||
+        normalizedMessage.includes("already exists") ||
+        normalizedMessage.includes("email already") ||
+        (normalizedMessage.includes("email") &&
+          normalizedMessage.includes("exist"))
+      ) {
+        setProfileError("هذا البريد الإلكتروني مستخدم بالفعل.");
+      } else {
+        setProfileError(
+          responseMessage ||
+            (error.message === "Network Error"
+              ? "تعذر الاتصال بالخادم. تأكد من تشغيل الباك إند."
+              : error.message ||
+                "تعذر تحديث بيانات الحساب. حاول مرة أخرى.")
+        );
+      }
+    } finally {
+      setProfileLoading(false);
+    }
+  }
+
+  // تحديث حقول كلمة المرور
   function handlePasswordChange(event) {
     const { name, value } = event.target;
 
@@ -70,6 +201,14 @@ function Profile() {
     setPageError("");
   }
 
+  function clearMessages() {
+    setCurrentPasswordError("");
+    setFormError("");
+    setSuccessMessage("");
+    setPageError("");
+  }
+
+  // تغيير كلمة المرور
   async function handleChangePassword(event) {
     event.preventDefault();
     clearMessages();
@@ -103,8 +242,8 @@ function Profile() {
 
     try {
       await api.patch("/auth/changepassword", {
-        currentPassword: currentPassword,
-        newPassword: newPassword,
+        currentPassword,
+        newPassword,
       });
 
       setCurrentPassword("");
@@ -136,7 +275,6 @@ function Profile() {
         responseMessage.includes("كلمه المرور الحاليه");
 
       if (isCurrentPasswordError) {
-        // رسالة خطأ الباسورد القديم تظهر أسفل حقله فقط
         setCurrentPasswordError(
           "كلمة المرور الحالية غير صحيحة، من فضلك حاول مرة أخرى."
         );
@@ -151,17 +289,19 @@ function Profile() {
     }
   }
 
+  // تسجيل الخروج
   async function handleLogout() {
     setPageError("");
 
     try {
       await logout();
       navigate("/signin", { replace: true });
-    } catch (error) {
+    } catch {
       setPageError("تعذر تسجيل الخروج. حاول مرة أخرى.");
     }
   }
 
+  // تعطيل الحساب
   async function handleDeactivateAccount() {
     setPageError("");
     setDeactivating(true);
@@ -191,7 +331,6 @@ function Profile() {
           </div>
 
           <h1>الملف الشخصي</h1>
-
           <p>إدارة حسابك وإعدادات الأمان في بصيرة AI</p>
         </header>
 
@@ -202,6 +341,7 @@ function Profile() {
           </div>
         )}
 
+        {/* معلومات الحساب */}
         <section className="profile-card">
           <div className="profile-card-heading">
             <div className="profile-section-icon">
@@ -210,25 +350,174 @@ function Profile() {
 
             <div>
               <h2>معلومات الحساب</h2>
-              <p>معلومات حسابك الحالية</p>
+              <p>عرض وإدارة بياناتك الشخصية</p>
             </div>
           </div>
 
+          {/* البيانات الحالية */}
           <div className="profile-info">
             <div className="profile-info-item">
-              <span className="profile-info-label">الاسم</span>
-              <span className="profile-info-value">{displayName}</span>
+              <span className="profile-info-label">الاسم الحالي</span>
+              <span className="profile-info-value">
+                {displayName}
+              </span>
             </div>
 
             <div className="profile-info-item">
-              <span className="profile-info-label">البريد الإلكتروني</span>
-              <span className="profile-info-value">
+              <span className="profile-info-label">
+                البريد الإلكتروني
+              </span>
+              <span className="profile-info-value" dir="ltr">
                 {user.email || "غير متوفر"}
               </span>
             </div>
           </div>
+
+          {/* رسالة نجاح آخر تعديل */}
+          {profileSuccess && (
+            <div
+              className="profile-alert profile-alert-success"
+              role="status"
+            >
+              <i className="bi bi-check-circle" aria-hidden="true"></i>
+              <span>{profileSuccess}</span>
+            </div>
+          )}
+
+          {/* زر فتح نموذج التعديل */}
+          {!isEditingProfile && (
+            <button
+              type="button"
+              className="profile-primary-button profile-edit-toggle"
+              onClick={handleOpenProfileEdit}
+            >
+              <i className="bi bi-pencil-square" aria-hidden="true"></i>
+              تعديل الملف الشخصي
+            </button>
+          )}
+
+          {/* نموذج التعديل يظهر عند الضغط على الزر فقط */}
+          {isEditingProfile && (
+            <form
+              className="profile-edit-form"
+              onSubmit={handleUpdateProfile}
+              noValidate
+            >
+              <div className="profile-edit-fields">
+                <div className="profile-form-group">
+                  <label htmlFor="profileFirstName">الاسم الأول</label>
+                  <input
+                    id="profileFirstName"
+                    type="text"
+                    value={firstName}
+                    onChange={(event) => {
+                      setFirstName(event.target.value);
+                      setProfileError("");
+                      setProfileSuccess("");
+                    }}
+                    placeholder="أدخل الاسم الأول"
+                    autoComplete="given-name"
+                    maxLength={50}
+                    disabled={profileLoading}
+                    required
+                  />
+                </div>
+
+                <div className="profile-form-group">
+                  <label htmlFor="profileLastName">اسم العائلة</label>
+                  <input
+                    id="profileLastName"
+                    type="text"
+                    value={lastName}
+                    onChange={(event) => {
+                      setLastName(event.target.value);
+                      setProfileError("");
+                      setProfileSuccess("");
+                    }}
+                    placeholder="أدخل اسم العائلة"
+                    autoComplete="family-name"
+                    maxLength={50}
+                    disabled={profileLoading}
+                    required
+                  />
+                </div>
+
+                <div className="profile-form-group profile-email-group">
+                  <label htmlFor="profileEmail">
+                    البريد الإلكتروني
+                  </label>
+                  <input
+                    id="profileEmail"
+                    type="email"
+                    value={email}
+                    onChange={(event) => {
+                      setEmail(event.target.value);
+                      setProfileError("");
+                      setProfileSuccess("");
+                    }}
+                    placeholder="example@email.com"
+                    autoComplete="email"
+                    maxLength={254}
+                    dir="ltr"
+                    disabled={profileLoading}
+                    required
+                  />
+                </div>
+              </div>
+
+              {profileError && (
+                <div
+                  className="profile-alert profile-alert-error"
+                  role="alert"
+                >
+                  <i
+                    className="bi bi-exclamation-circle"
+                    aria-hidden="true"
+                  ></i>
+                  <span>{profileError}</span>
+                </div>
+              )}
+
+              <div className="profile-edit-actions">
+                <button
+                  type="submit"
+                  className="profile-primary-button"
+                  disabled={profileLoading}
+                >
+                  {profileLoading ? (
+                    <>
+                      <span
+                        className="profile-spinner"
+                        aria-hidden="true"
+                      ></span>
+                      جارٍ حفظ البيانات...
+                    </>
+                  ) : (
+                    <>
+                      <i
+                        className="bi bi-check2-circle"
+                        aria-hidden="true"
+                      ></i>
+                      حفظ البيانات
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="profile-cancel-button"
+                  onClick={handleCancelProfileEdit}
+                  disabled={profileLoading}
+                >
+                  <i className="bi bi-x-circle" aria-hidden="true"></i>
+                  إلغاء
+                </button>
+              </div>
+            </form>
+          )}
         </section>
 
+        {/* تغيير كلمة المرور */}
         <section className="profile-card">
           <div className="profile-card-heading">
             <div className="profile-section-icon">
@@ -294,7 +583,6 @@ function Profile() {
                 </button>
               </div>
 
-              {/* رسالة الخطأ هنا تحت حقل الباسورد القديم مباشرة */}
               {currentPasswordError && (
                 <div
                   id="currentPasswordError"
@@ -427,7 +715,10 @@ function Profile() {
                 </>
               ) : (
                 <>
-                  <i className="bi bi-shield-check" aria-hidden="true"></i>
+                  <i
+                    className="bi bi-shield-check"
+                    aria-hidden="true"
+                  ></i>
                   تغيير كلمة المرور
                 </>
               )}
@@ -435,6 +726,7 @@ function Profile() {
           </form>
         </section>
 
+        {/* إعدادات الحساب */}
         <section className="profile-card profile-account-actions">
           <div className="profile-card-heading">
             <div className="profile-section-icon">
@@ -483,7 +775,9 @@ function Profile() {
                     onClick={handleDeactivateAccount}
                     disabled={deactivating}
                   >
-                    {deactivating ? "جارٍ التعطيل..." : "نعم، تعطيل الحساب"}
+                    {deactivating
+                      ? "جارٍ التعطيل..."
+                      : "نعم، تعطيل الحساب"}
                   </button>
 
                   <button
