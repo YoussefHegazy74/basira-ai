@@ -17,9 +17,8 @@ function maskEmail(email) {
     )}@${domain}`;
   }
 
-  return `${name[0]}${"*".repeat(name.length - 2)}${
-    name[name.length - 1]
-  }@${domain}`;
+  return `${name[0]}${"*".repeat(name.length - 2)}${name[name.length - 1]
+    }@${domain}`;
 }
 
 function ForgotPassword() {
@@ -65,12 +64,12 @@ function ForgotPassword() {
 
       setMessage(
         response.data?.message ||
-          "لو البريد الإلكتروني مسجل عندنا، هتوصلك تعليمات استعادة كلمة المرور."
+        "لو البريد الإلكتروني مسجل عندنا، هتوصلك تعليمات استعادة كلمة المرور."
       );
     } catch (err) {
       setError(
         err.response?.data?.message ||
-          "حصلت مشكلة أثناء إرسال الطلب. حاول تاني بعد شوية."
+        "حصلت مشكلة أثناء إرسال الطلب. حاول تاني بعد شوية."
       );
     } finally {
       setLoading(false);
@@ -211,7 +210,9 @@ function ForgotPassword() {
 
         <div className="forgot-footer">
           <span>فاكر كلمة المرور؟</span>
-          <Link to="/signin">سجّل دخولك</Link>
+          <Link to={returnPath}>
+            {isLoggedIn ? "العودة للبروفايل" : "سجّل دخولك"}
+          </Link>
         </div>
       </section>
 
