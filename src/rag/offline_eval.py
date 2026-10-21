@@ -357,7 +357,7 @@ def run_retrieval_eval(
         # Pool mode: neutralize selection so the full fused pool is returned.
         P._select_diverse = (
             lambda candidates, top_k, bypass_ids=None, lex_top3_ids=None,
-            sem_top3_ids=None: candidates
+            sem_top3_ids=None, priority_ids=None, must_ids=None: candidates
         )
         pool = P.retrieve(q["question"], index, chunks, None, top_k=5)
         pool_rank = _evidence_rank(pool, evidence) if evidence else None

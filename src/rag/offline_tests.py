@@ -1199,14 +1199,19 @@ def test_refusal_prefix_grounding() -> None:
         out = answer_for(REFUSAL)
         check("canonical refusal is preserved", out == REFUSAL)
 
-        # D. A supported answer still survives grounding unchanged.
+        # D. A supported answer survives grounding and keeps its valid
+        #    citation marker for auditability.
         out = answer_for(supported_cited)
-        check("supported answer survives grounding", out == supported)
+        check("supported answer survives grounding",
+              out == supported_cited)
+        check("valid source citation remains traceable",
+              "(مصدر 1)" in out)
 
         # E. Mixed supported/unsupported sentences with citations: keep only
-        #    the supported one.
+        #    the supported sentence and its valid citation.
         out = answer_for(supported_cited + " " + hallucination_cited)
-        check("mixed answer keeps the supported sentence", out == supported)
+        check("mixed answer keeps the supported sentence",
+              out == supported_cited)
         check("mixed answer drops the unsupported sentence",
               hallucination not in out)
     finally:
