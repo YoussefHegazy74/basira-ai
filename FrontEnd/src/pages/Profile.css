@@ -525,3 +525,157 @@
     width: 100%;
   }
 }
+
+
+/* Edit profile information */
+
+.profile-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  margin-top: 25px;
+}
+
+.profile-edit-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.profile-edit-form .profile-form-group input {
+  width: 100%;
+  min-width: 0;
+  height: 49px;
+  padding: 0 14px;
+  border: 1px solid #dce5dd;
+  border-radius: 10px;
+  outline: none;
+  background: #fbfcfb;
+  color: #24352a;
+  font-family: inherit;
+  font-size: 14px;
+  transition: border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.profile-edit-form .profile-form-group input:focus {
+  border-color: #4d9464;
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(77, 148, 100, 0.12);
+}
+
+.profile-edit-form .profile-form-group input:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.profile-email-group {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 600px) {
+  .profile-edit-fields {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+
+  .profile-email-group {
+    grid-column: auto;
+  }
+}
+
+
+/* أزرار تعديل الملف الشخصي */
+.profile-edit-toggle {
+  margin-top: 24px;
+}
+
+.profile-edit-form {
+  margin-top: 24px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(0, 0, 0, 0.08);
+  animation: profileEditAppear 0.25s ease;
+}
+
+.profile-edit-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.profile-email-group {
+  grid-column: 1 / -1;
+}
+
+.profile-edit-form .profile-form-group input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.profile-edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.profile-edit-actions button {
+  margin-top: 0;
+}
+
+.profile-cancel-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 12px 22px;
+  border: 1px solid #d8e1dc;
+  border-radius: 10px;
+  background: #fff;
+  color: #42534a;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.profile-cancel-button:hover {
+  background: #f1f6f3;
+  border-color: #9eb8a8;
+}
+
+.profile-cancel-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+@keyframes profileEditAppear {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 576px) {
+  .profile-edit-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .profile-email-group {
+    grid-column: auto;
+  }
+
+  .profile-edit-actions {
+    flex-direction: column;
+  }
+
+  .profile-edit-actions button {
+    width: 100%;
+  }
+}
