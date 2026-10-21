@@ -134,9 +134,11 @@ function Home() {
           <div className="services-grid">
             {services.map(function (service) {
               return (
-                <article
+                <Link
                   className="service-card"
                   key={service.number}
+                  to={service.link}
+                  aria-label={`${service.title} - ${service.action}`}
                 >
                   <div className="card-top">
                     <span className="service-icon">
@@ -152,14 +154,11 @@ function Home() {
 
                   <p>{service.description}</p>
 
-                  <Link
-                    className="service-link"
-                    to={service.link}
-                  >
+                  <span className="service-link">
                     {service.action}
                     <i className="bi bi-arrow-left"></i>
-                  </Link>
-                </article>
+                  </span>
+                </Link>
               );
             })}
           </div>
@@ -188,7 +187,7 @@ function Home() {
             </p>
           </div>
 
-          <Link className="about-button" to="/chat">
+          <Link className="about-button" to="/services">
             استكشف الخدمات
             <i className="bi bi-arrow-left"></i>
           </Link>
