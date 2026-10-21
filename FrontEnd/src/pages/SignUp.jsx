@@ -21,6 +21,10 @@ function SignUp() {
 
   const [verificationToken, setVerificationToken] = useState("");
 
+  // إظهار وإخفاء حقلي كلمة المرور
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
   function handleChange(event) {
     const { name, value } = event.target;
     setForm(function (previous) {
@@ -104,7 +108,9 @@ function SignUp() {
       <section className="auth-card">
         <Link to="/" className="auth-logo">
           <i className="bi bi-eye-fill"></i>
-          <span>بصيرة <small>Basira AI</small></span>
+          <span>
+            بصيرة <small>Basira AI</small>
+          </span>
         </Link>
 
         <div className="auth-heading">
@@ -174,32 +180,76 @@ function SignUp() {
 
             <div className="auth-field">
               <label htmlFor="signup-password">كلمة المرور</label>
-              <input
-                id="signup-password"
-                type="password"
-                name="password"
-                autoComplete="new-password"
-                value={form.password}
-                onChange={handleChange}
-                placeholder="أنشئ كلمة مرور"
-                required
-              />
+
+              <div className="auth-password-wrapper">
+                <input
+                  id="signup-password"
+                  type={showPassword ? "text" : "password"}
+                  name="password"
+                  autoComplete="new-password"
+                  value={form.password}
+                  onChange={handleChange}
+                  placeholder="أنشئ كلمة مرور"
+                  required
+                />
+
+                <button
+                  type="button"
+                  className="auth-password-toggle"
+                  onClick={() => setShowPassword(!showPassword)}
+                  aria-label={
+                    showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"
+                  }
+                  aria-pressed={showPassword}
+                >
+                  <i
+                    className={`bi ${
+                      showPassword ? "bi-eye-slash" : "bi-eye"
+                    }`}
+                    aria-hidden="true"
+                  ></i>
+                </button>
+              </div>
             </div>
 
             <div className="auth-field">
               <label htmlFor="signup-confirm-password">
                 تأكيد كلمة المرور
               </label>
-              <input
-                id="signup-confirm-password"
-                type="password"
-                name="passwordconfirm"
-                autoComplete="new-password"
-                value={form.passwordconfirm}
-                onChange={handleChange}
-                placeholder="أعد كتابة كلمة المرور"
-                required
-              />
+
+              <div className="auth-password-wrapper">
+                <input
+                  id="signup-confirm-password"
+                  type={showConfirmPassword ? "text" : "password"}
+                  name="passwordconfirm"
+                  autoComplete="new-password"
+                  value={form.passwordconfirm}
+                  onChange={handleChange}
+                  placeholder="أعد كتابة كلمة المرور"
+                  required
+                />
+
+                <button
+                  type="button"
+                  className="auth-password-toggle"
+                  onClick={() =>
+                    setShowConfirmPassword(!showConfirmPassword)
+                  }
+                  aria-label={
+                    showConfirmPassword
+                      ? "إخفاء تأكيد كلمة المرور"
+                      : "إظهار تأكيد كلمة المرور"
+                  }
+                  aria-pressed={showConfirmPassword}
+                >
+                  <i
+                    className={`bi ${
+                      showConfirmPassword ? "bi-eye-slash" : "bi-eye"
+                    }`}
+                    aria-hidden="true"
+                  ></i>
+                </button>
+              </div>
             </div>
 
             <button className="auth-submit" type="submit" disabled={loading}>
