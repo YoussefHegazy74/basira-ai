@@ -1,82 +1,132 @@
-
 import { Link } from "react-router-dom";
+import "../styles/home.css";
+import { formatNumber } from "../utils/format";
 
-const services = [
+const SERVICES = [
   {
     icon: "bi-chat-square-text",
-    title: "المساعد الذكي",
+    title: "المساعد المعرفي",
     description:
-      "اطرح أسئلتك واحصل على إجابات تساعدك على الوصول إلى المعلومات.",
-    link: "/chat",
+      "مناسب للأسئلة المفتوحة والاستفسارات القصيرة. اكتب سؤالك، واقرأ الإجابة مع إمكانية الرجوع إلى المصادر.",
     action: "ابدأ المحادثة",
+    to: "/chat",
   },
   {
     icon: "bi-shield-check",
     title: "التحقق من المعلومات",
     description:
-      "استخدم أدوات التحقق لفهم مدى موثوقية المعلومات والنصوص.",
-    link: "/verify",
-    action: "تحقق الآن",
+      "مناسب عندما يكون لديك نص أو معلومة جاهزة وتريد معرفة مدى دعمها لما هو موثق.",
+    action: "تحقق من نص",
+    to: "/verify",
   },
   {
-    icon: "bi-book-half",
-    title: "التفسير",
+    icon: "bi-book",
+    title: "البحث في التفسير",
     description:
-      "استخدم خدمة التفسير للوصول إلى المعلومات المرتبطة بالآيات.",
-    link: "/tafsir",
-    action: "استكشف التفسير",
+      "مناسب للبحث عن آية محددة وقراءة تفسيرها في صفحة واضحة بعيدة عن التشتت.",
+    action: "ابحث في التفسير",
+    to: "/tafsir",
   },
 ];
 
 function Services() {
   return (
-    <main className="service-page">
-      <div className="container">
-        <div className="section-heading">
-          <span className="section-label">خدمات بصيرة</span>
-
-          <h1 className="service-page-title">
-            أدوات ذكية لخدمة المعرفة
-          </h1>
-
-          <p>
-            استكشف خدمات بصيرة AI واختر الأداة المناسبة
-            لاحتياجك.
-          </p>
+    <main className="page">
+      <section className="marketing-hero">
+        <div className="container">
+          <header className="page-header" data-reveal>
+            <p className="eyebrow">الأدوات</p>
+            <h1>أداة مناسبة لكل سؤال</h1>
+            <p>
+              لا تحتاج إلى تعلم مصطلحات جديدة. اختر الطريقة الأقرب لما
+              تريده، وستجد واجهة بسيطة تشرح لك الخطوة التالية.
+            </p>
+          </header>
         </div>
+      </section>
 
-        <div className="services-grid">
-          {services.map(function (service, index) {
-            return (
-              <Link
-                className="service-card"
-                key={service.title}
-                to={service.link}
-                aria-label={`${service.title} - ${service.action}`}
-              >
-                <div className="card-top">
-                  <span className="service-icon">
-                    <i className={`bi ${service.icon}`}></i>
-                  </span>
+      <section className="marketing-section" aria-labelledby="services-list-title">
+        <div className="container">
+          <h2 className="sr-only" id="services-list-title">
+            قائمة الأدوات
+          </h2>
 
-                  <span className="service-number">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
+          <div className="service-list">
+            {SERVICES.map((service, index) => (
+              <article className="service-row" key={service.to} data-reveal>
+                <span className="service-icon" aria-hidden="true">
+                  <i className={`bi ${service.icon}`}></i>
+                </span>
+
+                <div className="service-row-copy">
+                  <p className="service-index">
+                    الأداة {formatNumber(index + 1)}
+                  </p>
+                  <h2>{service.title}</h2>
+                  <p>{service.description}</p>
                 </div>
 
-                <h3>{service.title}</h3>
-
-                <p>{service.description}</p>
-
-                <span className="service-link">
+                <Link className="btn btn-secondary" to={service.to}>
                   {service.action}
-                  <i className="bi bi-arrow-left"></i>
-                </span>
-              </Link>
-            );
-          })}
+                  <i className="bi bi-arrow-left" aria-hidden="true"></i>
+                </Link>
+              </article>
+            ))}
+          </div>
+
+          <div className="helper-panel" data-reveal>
+            <div>
+              <strong>لست متأكدًا من الأداة المناسبة؟</strong>
+              <p>
+                ابدأ بمحادثة عادية. يمكنك وصف ما تبحث عنه، ثم اختيار أداة
+                أخرى إن احتجت.
+              </p>
+            </div>
+            <Link className="btn btn-primary" to="/chat">
+              اسأل بصيرة
+              <i className="bi bi-arrow-left" aria-hidden="true"></i>
+            </Link>
+          </div>
         </div>
-      </div>
+      </section>
+
+      <section className="marketing-section section-muted" aria-labelledby="services-notes-title">
+        <div className="container">
+          <div className="section-header" data-reveal>
+            <p className="eyebrow">قبل أن تبدأ</p>
+            <h2 id="services-notes-title">ثلاث ملاحظات تجعل التجربة أوضح</h2>
+          </div>
+
+          <div className="feature-grid">
+            <article className="feature-card" data-reveal>
+              <i className="bi bi-pencil" aria-hidden="true"></i>
+              <h3>اكتب التفاصيل المهمة</h3>
+              <p>
+                كلما كان السؤال أو النص أوضح، كان من الأسهل فهم المطلوب
+                ومراجعة النتيجة.
+              </p>
+            </article>
+
+            <article className="feature-card" data-reveal>
+              <i className="bi bi-journal-text" aria-hidden="true"></i>
+              <h3>راجع المرجع بنفسك</h3>
+              <p>
+                النتيجة مساعدة للفهم، وليست بديلًا عن قراءة المصدر أو سؤال
+                أهل الاختصاص.
+              </p>
+            </article>
+
+            <article className="feature-card" data-reveal>
+              <i className="bi bi-hourglass-split" aria-hidden="true"></i>
+              <h3>امنحها وقتًا كافيًا</h3>
+              <p>
+                قد يستغرق تجهيز الإجابة لحظات. ستظهر حالة واضحة أثناء
+                الانتظار، ويمكنك المحاولة مجددًا عند الحاجة.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
     </main>
   );
 }

@@ -1,196 +1,258 @@
-
 import { Link } from "react-router-dom";
-import "../App.css";
+import "../styles/home.css";
+import { formatNumber } from "../utils/format";
+
+const SERVICES = [
+  {
+    icon: "bi-chat-square-text",
+    title: "المساعد المعرفي",
+    description:
+      "اطرح سؤالك بلغة عادية، واقرأ إجابة واضحة مع إمكانية الرجوع إلى ما استندت إليه.",
+    action: "ابدأ المحادثة",
+    to: "/chat",
+  },
+  {
+    icon: "bi-shield-check",
+    title: "التحقق من المعلومات",
+    description:
+      "ضع نصًا أو معلومة أمامك، واعرف ما إذا كانت المصادر تدعمها أم تحتاج إلى مراجعة.",
+    action: "تحقق من نص",
+    to: "/verify",
+  },
+  {
+    icon: "bi-book",
+    title: "البحث في التفسير",
+    description:
+      "ابحث عن آية واقرأ تفسيرها في صفحة مباشرة، بعيدًا عن التعقيد والتشتت.",
+    action: "ابحث في التفسير",
+    to: "/tafsir",
+  },
+];
+
+const PRINCIPLES = [
+  {
+    icon: "bi-translate",
+    title: "عربية من البداية",
+    description:
+      "كل الواجهة مصممة للقارئ العربي؛ لغة واضحة، واتجاه صحيح، وتفاصيل تناسب النص العربي.",
+  },
+  {
+    icon: "bi-journal-check",
+    title: "المصدر قبل الحكم",
+    description:
+      "الإجابة ليست نهاية الطريق. نساعدك على رؤية المرجع، ومقارنة السياق، واتخاذ قرارك بنفسك.",
+  },
+  {
+    icon: "bi-circle-half",
+    title: "هدوء بصري",
+    description:
+      "لا مؤثرات صاخبة ولا ألوان مبالغ فيها. مساحة مرتبة تترك التركيز للمحتوى الذي تقرأه.",
+  },
+];
 
 function Home() {
-  const services = [
-    {
-      icon: "bi-chat-square-text",
-      number: "01",
-      title: "المساعد الذكي",
-      description:
-        "اسأل عن المعلومات التي تبحث عنها، واحصل على إجابات واضحة باللغة العربية.",
-      link: "/chat",
-      action: "ابدأ المحادثة",
-    },
-    {
-      icon: "bi-shield-check",
-      number: "02",
-      title: "التحقق من المعلومات",
-      description:
-        "افحص النصوص والمعلومات، وساعد نفسك على فهم مدى موثوقيتها.",
-      link: "/verify",
-      action: "تحقق الآن",
-    },
-    {
-      icon: "bi-book-half",
-      number: "03",
-      title: "التفسير",
-      description:
-        "استكشف خدمة التفسير وابحث عن الآيات والمعلومات المرتبطة بها.",
-      link: "/tafsir",
-      action: "اكتشف الخدمة",
-    },
-  ];
-
   return (
-    <main>
-      {/* Hero Section */}
-      <section className="hero" id="home">
-        <div className="container hero-content">
-          <div className="hero-text">
-            <div className="eyebrow">
-              <span className="status-dot"></span>
-              الذكاء الاصطناعي باللغة العربية
-            </div>
+    <main className="home-page">
+      <section className="home-hero">
+        <div className="container home-hero-grid">
+          <div className="hero-copy" data-reveal>
+            <p className="eyebrow">مساحة عربية للمعرفة</p>
 
             <h1>
-              المعرفة تبدأ من
-              <span> بصيرة.</span>
+              اعرف أكثر،
+              <span>وثق بما تعرف.</span>
             </h1>
 
-            <p>
-              منصتك الذكية للبحث والفهم والتحقق من المعلومات.
-              اكتشف تجربة عربية تساعدك على الوصول إلى المعرفة
-              بطريقة أوضح وأسهل.
+            <p className="lead">
+              بصيرة تجمع المحادثة والتحقق من المعلومات والتفسير في تجربة
+              واحدة هادئة. تعطيك الإجابة، وتذكّرك دائمًا بأن ترجع إلى
+              مصدرها.
             </p>
 
             <div className="hero-actions">
-              <Link className="primary-button" to="/services">
-                اكتشف خدماتنا
-                <i className="bi bi-arrow-left"></i>
+              <Link className="btn btn-primary" to="/chat">
+                ابدأ محادثة
+                <i className="bi bi-arrow-left" aria-hidden="true"></i>
               </Link>
-
-              <Link className="secondary-button" to="/about">
-                تعرّف علينا
+              <Link className="btn btn-secondary" to="/services">
+                تعرّف على الأدوات
               </Link>
             </div>
 
-            <div className="hero-note">
-              <i className="bi bi-stars"></i>
-              <span>تجربة عربية، بسيطة وذكية</span>
-            </div>
+            <ul className="hero-notes">
+              <li>
+                <i className="bi bi-check2" aria-hidden="true"></i>
+                واجهة عربية بالكامل
+              </li>
+              <li>
+                <i className="bi bi-check2" aria-hidden="true"></i>
+                مصادر يمكن الرجوع إليها
+              </li>
+              <li>
+                <i className="bi bi-check2" aria-hidden="true"></i>
+                وضع ليلي مريح
+              </li>
+            </ul>
           </div>
 
-          {/* Hero Visual */}
-          <div className="hero-visual">
-            <div className="visual-glow"></div>
+          <div className="demo-stage" data-reveal>
+            <div className="demo-card">
+              <div className="demo-card-head">
+                <span>مثال توضيحي</span>
+                <span>
+                  <i className="bi bi-chat-square-text" aria-hidden="true"></i>
+                  محادثة
+                </span>
+              </div>
 
-            <div className="orbit orbit-one"></div>
-            <div className="orbit orbit-two"></div>
+              <p className="demo-question">
+                كيف أتحقق من صحة معلومة قبل أن أعتمد عليها؟
+              </p>
 
-            <div className="main-symbol">
-              <i className="bi bi-eye"></i>
-              <span>بصيرة</span>
-              <small>رؤية أعمق للمعرفة</small>
-            </div>
+              <div className="demo-answer">
+                <strong>بصيرة</strong>
+                لا تعتمد على الإجابة وحدها. اقرأ المصدر، وقارن بين أكثر من
+                مرجع، ولاحظ سياق النص قبل أن تصل إلى نتيجة.
+              </div>
 
-            <div className="floating-card floating-top">
-              <span className="floating-icon">
-                <i className="bi bi-stars"></i>
-              </span>
+              <div className="demo-source">
+                <span className="demo-source-icon" aria-hidden="true">
+                  <i className="bi bi-journal-text"></i>
+                </span>
+                <span className="demo-source-copy">
+                  <strong>المصدر</strong>
+                  <span>مرجع مرتبط بالإجابة</span>
+                </span>
+              </div>
 
-              <span>
-                <strong>مساعد ذكي</strong>
-                <small>إجابات باللغة العربية</small>
-              </span>
-            </div>
-
-            <div className="floating-card floating-bottom">
-              <span className="floating-icon">
-                <i className="bi bi-shield-check"></i>
-              </span>
-
-              <span>
-                <strong>فهم أفضل</strong>
-                <small>أدوات للبحث والتحقق</small>
-              </span>
+              <p className="demo-card-foot">
+                <i className="bi bi-info-circle" aria-hidden="true"></i>
+                مثال يوضح شكل الإجابة، وليس إجابة فعلية.
+              </p>
             </div>
           </div>
         </div>
-
-        <div className="hero-decoration decoration-one"></div>
-        <div className="hero-decoration decoration-two"></div>
       </section>
 
-      {/* Services Section */}
-      <section className="services section" id="services">
+      <section className="section" aria-labelledby="home-services-title">
         <div className="container">
-          <div className="section-heading">
-            <span className="section-label">
-              ماذا تقدم بصيرة؟
-            </span>
-
-            <h2>
-              كل ما تحتاجه، <span>في مكان واحد</span>
-            </h2>
-
+          <div className="section-header" data-reveal>
+            <p className="eyebrow">الأدوات</p>
+            <h2 id="home-services-title">ثلاث طرق للوصول إلى المعرفة</h2>
             <p>
-              أدوات ذكية صُممت لتجعل الوصول إلى المعلومات
-              والتعامل معها أكثر سهولة.
+              اختر الأداة بحسب سؤالك. كلها تعمل بالعربية، وتترك لك مساحة
+              للمراجعة قبل الوصول إلى حكم.
             </p>
           </div>
 
-          <div className="services-grid">
-            {services.map(function (service) {
-              return (
-                <Link
-                  className="service-card"
-                  key={service.number}
-                  to={service.link}
-                  aria-label={`${service.title} - ${service.action}`}
-                >
-                  <div className="card-top">
-                    <span className="service-icon">
-                      <i className={`bi ${service.icon}`}></i>
-                    </span>
-
-                    <span className="service-number">
-                      {service.number}
-                    </span>
-                  </div>
-
-                  <h3>{service.title}</h3>
-
-                  <p>{service.description}</p>
-
-                  <span className="service-link">
-                    {service.action}
-                    <i className="bi bi-arrow-left"></i>
+          <div className="cards-grid">
+            {SERVICES.map((service, index) => (
+              <Link
+                className="service-card"
+                to={service.to}
+                key={service.to}
+                data-reveal
+              >
+                <div className="service-card-top">
+                  <span className="service-icon" aria-hidden="true">
+                    <i className={`bi ${service.icon}`}></i>
                   </span>
-                </Link>
-              );
-            })}
+                  <span className="service-index">
+                    {formatNumber(index + 1).padStart(2, "٠")}
+                  </span>
+                </div>
+
+                <h3>{service.title}</h3>
+                <p>{service.description}</p>
+
+                <span className="service-link">
+                  {service.action}
+                  <i className="bi bi-arrow-left" aria-hidden="true"></i>
+                </span>
+              </Link>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* About Section */}
-      <section className="about-section" id="about">
-        <div className="container about-content">
-          <div className="about-icon">
-            <i className="bi bi-lightbulb"></i>
-          </div>
-
-          <div>
-            <span className="section-label">
-              عن المشروع
-            </span>
-
-            <h2>التقنية في خدمة المعرفة</h2>
-
+      <section className="section section-muted" aria-labelledby="home-principles-title">
+        <div className="container">
+          <div className="section-header" data-reveal>
+            <p className="eyebrow">لماذا بصيرة؟</p>
+            <h2 id="home-principles-title">أقل ادعاءً، ومساحة أكبر للفهم</h2>
             <p>
-              بصيرة AI مشروع يهدف إلى تقديم تجربة عربية
-              للاستفادة من تقنيات الذكاء الاصطناعي في البحث
-              عن المعلومات وفهمها والتحقق منها، من خلال
-              واجهة سهلة الاستخدام.
+              لا نحاول أن نبدو أذكى منك. نحاول فقط أن نجعل الوصول إلى
+              المعلومة ومراجعتها أسهل وأكثر ترتيبًا.
             </p>
           </div>
 
-          <Link className="about-button" to="/services">
-            استكشف الخدمات
-            <i className="bi bi-arrow-left"></i>
-          </Link>
+          <div className="principles-grid">
+            {PRINCIPLES.map((principle) => (
+              <article className="principle" key={principle.title} data-reveal>
+                <span className="principle-icon" aria-hidden="true">
+                  <i className={`bi ${principle.icon}`}></i>
+                </span>
+                <h3>{principle.title}</h3>
+                <p>{principle.description}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <section className="section" aria-labelledby="home-steps-title">
+        <div className="container">
+          <div className="section-header" data-reveal>
+            <p className="eyebrow">كيف تستخدمها؟</p>
+            <h2 id="home-steps-title">خطوات قليلة، ونتيجة أوضح</h2>
+          </div>
+
+          <div className="steps-grid">
+            <article className="step" data-reveal>
+              <span className="step-number">{formatNumber(1)}</span>
+              <h3>اكتب سؤالك</h3>
+              <p>
+                استخدم لغتك الطبيعية. لا تحتاج إلى صياغة خاصة أو مصطلحات
+                تقنية.
+              </p>
+            </article>
+
+            <article className="step" data-reveal>
+              <span className="step-number">{formatNumber(2)}</span>
+              <h3>راجع الإجابة</h3>
+              <p>
+                اقرأ النص كاملًا، وانتبه إلى ما تدعمه المصادر وما لا تدعمه.
+              </p>
+            </article>
+
+            <article className="step" data-reveal>
+              <span className="step-number">{formatNumber(3)}</span>
+              <h3>ارجع إلى المرجع</h3>
+              <p>
+                افتح المصدر عند الحاجة، وقارن السياق قبل أن تعتمد على أي
+                معلومة.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section className="section">
+        <div className="container">
+          <div className="cta-panel" data-reveal>
+            <div>
+              <p className="eyebrow">خطوة أولى بسيطة</p>
+              <h2>لديك سؤال الآن؟</h2>
+              <p>
+                ابدأ محادثة قصيرة، أو استخدم أداة التحقق إذا كان النص أمامك
+                بالفعل.
+              </p>
+            </div>
+            <Link className="btn btn-primary" to="/chat">
+              ابدأ المحادثة
+              <i className="bi bi-arrow-left" aria-hidden="true"></i>
+            </Link>
+          </div>
         </div>
       </section>
     </main>

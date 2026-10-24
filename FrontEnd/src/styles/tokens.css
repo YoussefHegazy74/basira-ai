@@ -1,0 +1,112 @@
+:root {
+  --font-sans: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+
+  --accent: #2f5d4c;
+  --accent-hover: #254b3d;
+  --accent-contrast: #ffffff;
+  --accent-soft: #e5ece6;
+  --accent-soft-strong: #d5e2d8;
+
+  --background: #f7f5ef;
+  --surface: #fffdf9;
+  --surface-muted: #f2f0e9;
+  --surface-strong: #e9e7df;
+  --surface-inverse: #1d2822;
+
+  --text: #1c2822;
+  --text-soft: #45564e;
+  --muted: #6f7c75;
+  --muted-strong: #58665f;
+
+  --border: #dddcd2;
+  --border-strong: #c7c9bd;
+
+  --danger: #9b3d36;
+  --danger-hover: #81312b;
+  --danger-soft: #f8ece9;
+  --success: #2f684e;
+  --success-soft: #e9f2ec;
+  --warning: #82621f;
+  --warning-soft: #f7f0dd;
+
+  --focus: #2f5d4c;
+
+  --shadow-xs: 0 1px 2px rgb(28 40 34 / 5%);
+  --shadow-sm: 0 6px 18px rgb(28 40 34 / 6%);
+  --shadow-md: 0 18px 42px rgb(28 40 34 / 9%);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-xl: 26px;
+  --radius-pill: 999px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 56px;
+  --space-10: 72px;
+  --space-11: 96px;
+  --space-12: 120px;
+
+  --container: 1160px;
+  --container-narrow: 880px;
+  --header-height: 76px;
+
+  --transition-fast: 150ms ease;
+  --transition-base: 220ms ease;
+  --transition-slow: 300ms cubic-bezier(0.22, 1, 0.36, 1);
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --accent: #8dbda7;
+  --accent-hover: #a4cdb9;
+  --accent-contrast: #13221b;
+  --accent-soft: #26352d;
+  --accent-soft-strong: #30443a;
+
+  --background: #151a17;
+  --surface: #1d2420;
+  --surface-muted: #222a25;
+  --surface-strong: #2a332d;
+  --surface-inverse: #edf1ed;
+
+  --text: #edf1ed;
+  --text-soft: #c5cec8;
+  --muted: #a2aea6;
+  --muted-strong: #b5c0b8;
+
+  --border: #343d36;
+  --border-strong: #48544b;
+
+  --danger: #e39a94;
+  --danger-hover: #efb0aa;
+  --danger-soft: #392524;
+  --success: #9ac9ae;
+  --success-soft: #22332a;
+  --warning: #d9bd7d;
+  --warning-soft: #352e1f;
+
+  --focus: #a4cdb9;
+
+  --shadow-xs: 0 1px 2px rgb(0 0 0 / 18%);
+  --shadow-sm: 0 8px 22px rgb(0 0 0 / 18%);
+  --shadow-md: 0 20px 48px rgb(0 0 0 / 24%);
+
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --transition-fast: 1ms linear;
+    --transition-base: 1ms linear;
+    --transition-slow: 1ms linear;
+  }
+}
