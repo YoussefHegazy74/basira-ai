@@ -26,6 +26,20 @@ def test_grounding_preserves_valid_citations(retrieved):
     assert "(مصدر 1)" in result
 
 
+def test_grounding_preserves_citation_at_end_without_period(retrieved):
+    answer = "الصلاة واجبة على المسلمين خمس مرات كل يوم (مصدر 1)"
+    result = pipeline._ground_answer(answer, retrieved)
+    assert "(مصدر 1)" in result
+    assert result.endswith("(مصدر 1)")
+
+
+def test_add_missing_citation_terminates_sentence(retrieved):
+    answer = "الصلاة واجبة على المسلمين خمس مرات كل يوم"
+    result = pipeline._add_missing_citations(answer, retrieved)
+    assert "(مصدر 1)" in result
+    assert result.endswith(".")
+
+
 def test_grounding_rejects_invalid_explicit_citation(retrieved):
     answer = "الصلاة واجبة على المسلمين خمس مرات كل يوم (مصدر 9)."
     result = pipeline._ground_answer(answer, retrieved)
@@ -374,7 +388,8 @@ def test_ghusl_completeness_adds_explicit_recommendation():
     out = pipeline._augment_answer_completeness(
         "ما حكم الغسل يوم الجمعة؟", answer, [fiqh58, fiqh59],
     )
-    assert "مستحب" in out
+    # The source's explicit recommendation wording is "تأكيد استحبابه".
+    assert "استحبابه" in out
     assert "بالفراغ من الصلاة" in out
 
 
@@ -421,6 +436,168 @@ def test_priority_selection_keeps_semantic_and_lexical_guarantees():
     ids = {c["id"] for c in selected}
     assert {"f5", "q1"} <= ids
     assert len(ids) == 4
+
+
+def test_priority_selection_reserves_top_fused_against_oversized_priority():
+    pool = [
+        {"id": f"f{i}", "source": "fiqh", "score": 10.0 - i}
+        for i in range(1, 11)
+    ]
+    selected = pipeline._select_diverse(
+        pool, 8, priority_ids={f"f{i}" for i in range(5, 11)})
+    ids = [c["id"] for c in selected]
+    # The fused top-4 reserve must survive even though the priority set is
+    # larger than the context, and the remaining slots still come from it.
+    assert {"f1", "f2", "f3", "f4"} <= set(ids)
+    assert len(ids) == 8
+    assert any(cid in {f"f{i}" for i in range(5, 11)} for cid in ids)
+
+
+def test_priority_selection_keeps_low_ranked_must_chunks():
+    pool = [
+        {"id": f"h{i}", "source": "hadith", "score": 10.0 - i}
+        for i in range(1, 9)
+    ] + [
+        {"id": "sira_440", "source": "sira", "score": 0.1},
+    ]
+    selected = pipeline._select_diverse(
+        pool, 8,
+        priority_ids={f"h{i}" for i in range(1, 9)},
+        must_ids={"sira_440"},
+    )
+    ids = {c["id"] for c in selected}
+    # A must chunk at pool rank 9 cannot be starved by a larger generic
+    # priority set (this was the second-Aqaba-pledge regression).
+    assert "sira_440" in ids
+    assert len(ids) == 8
+
+
+def test_lexical_must_ids_only_for_fully_covered_query():
+    lex = [{"id": "fiqh_512"}, {"id": "quran_72_26"}]
+    assert pipeline._lexical_must_ids(
+        lex, ["كفاره", "غيبه"], 2,
+    ) == {"fiqh_512"}
+    # A partial lexical match is not promoted.
+    assert pipeline._lexical_must_ids(
+        lex, ["كفاره", "غيبه", "اخري"], 2,
+    ) == set()
+    # Date questions need multi-chunk coverage and are not single-promoted.
+    assert pipeline._lexical_must_ids(
+        lex, ["غزوه", "بدر"], 2, asks_date=True,
+    ) == set()
+
+
+def test_priority_selection_keeps_lexical_must_against_priority_flood():
+    pool = [
+        {"id": f"h{i}", "source": "hadith", "score": 10.0 - i}
+        for i in range(1, 9)
+    ] + [
+        {"id": "fiqh_512", "source": "fiqh", "score": 0.1},
+    ]
+    selected = pipeline._select_diverse(
+        pool, 8,
+        priority_ids={f"h{i}" for i in range(1, 9)},
+        must_ids={"fiqh_512"},
+    )
+    assert "fiqh_512" in {c["id"] for c in selected}
+
+
+def test_seerah_title_index_includes_internal_passage_heading():
+    chunks = [
+        {
+            "id": "sira_farewell",
+            "source": "sira",
+            "reference": "سيرة ابن هشام، موافاة على في قفوله من اليمن رسول الله في الحج (2/5)",
+            "original_text": "(خُطْبَةُ الرَّسُولِ فِي حَجَّةِ الْوَدَاعِ): قَالَ ابْنُ إسْحَاقَ",
+        },
+        {
+            "id": "sira_other",
+            "source": "sira",
+            "reference": "سيرة ابن هشام، حجة الوداع (1/3)",
+            "original_text": "قَالَ ابْنُ إسْحَاقَ: فَلَمَّا دَخَلَ عَلَى رَسُولِ اللَّهِ",
+        },
+    ]
+    candidates = pipeline._seerah_title_candidates(
+        "ماذا أوصى النبي في خطبة حجة الوداع؟",
+        ["خطبه", "حجه", "وداع", "اوصي"],
+        chunks,
+    )
+    assert candidates
+    assert candidates[0]["id"] == "sira_farewell"
+
+
+def test_heading_fallback_keeps_supported_body_without_unsupported_label():
+    source = _rag_chunk(
+        "farewell",
+        'قال النبي صلى الله عليه وسلم: "إن دماءكم وأموالكم عليكم حرام '
+        'إلى أن تلقوا ربكم".',
+    )
+    corpus = [source] + [
+        _rag_chunk(f"farewell_bg{i}", "نص آخر للاختبار") for i in range(400)
+    ]
+    answer = (
+        '**تحريم الأموال والدماء**: قال النبي صلى الله عليه وسلم: '
+        '"إن دماءكم وأموالكم عليكم حرام إلى أن تلقوا ربكم" (مصدر 1).'
+    )
+    result = pipeline._ground_with_heading_fallback(
+        answer, [source], corpus)
+    assert "دماءكم وأموالكم" in result
+    assert "**" not in result
+    assert "تحريم" not in result
+
+
+def test_tafsir_completeness_prepends_opening_meaning_clause():
+    source = _rag_chunk(
+        "tafsir_hajj",
+        "يخبر تعالى أن أول بيت وضع للناس أي: لعموم الناس، لعبادتهم "
+        "ونسكهم، يطوفون به ويصلون إليه.",
+        source="tafsir",
+    )
+    answer = "الحج واجب على من استطاع إليه سبيلا (مصدر 1)."
+    result = pipeline._augment_answer_completeness(
+        "ما تفسير آية حج البيت من استطاع إليه سبيلا؟", answer, [source])
+    assert "أول بيت وضع للناس" in result
+    assert result.startswith("يخبر تعالى")
+
+
+def test_qasr_completeness_appends_two_rakahs():
+    source = _rag_chunk(
+        "qasr",
+        "المسافر يقصر الصلاة. وقال أنس: صليت الظهر بالمدينة أربعا "
+        "وبذي الحليفة ركعتين.",
+    )
+    answer = "المسافر يقصر الصلاة إذا خرج من بلده (مصدر 1)."
+    result = pipeline._augment_answer_completeness(
+        "متى يقصر المسافر الصلاة؟", answer, [source])
+    assert "ركعتين" in result
+
+
+def test_strip_al_keeps_lexical_allah_forms():
+    assert pipeline._strip_al("الله") == "الله"
+    assert pipeline._strip_al("لله") == "لله"
+    assert pipeline._strip_al("الرواتب") == "رواتب"
+    assert pipeline._strip_al("والرواتب") == "رواتب"
+
+
+def test_exact_quote_citation_is_repaired_to_the_containing_chunk():
+    wrong = _rag_chunk("wrong", "نص آخر لا يحتوي الاقتباس")
+    right = _rag_chunk(
+        "right", 'قال: "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ"')
+    sentence = 'قال: "الحمد لله رب العالمين" (مصدر 1).'
+    repaired = pipeline._repair_exact_quote_citation(
+        sentence, [wrong, right])
+    assert "(مصدر 2)" in repaired
+    assert "(مصدر 1)" not in repaired
+
+
+def test_grounding_accepts_verbatim_quote_with_orthographic_variants():
+    source = _rag_chunk(
+        "quote_ok",
+        'قَالَ: "الْحَمْدُ لِلَّهِ رَبِّ الْعَالَمِينَ"',
+    )
+    answer = 'قال: "الحمد لله رب العالمين" (مصدر 1).'
+    assert pipeline._quoted_spans_exact(answer, source) is True
+    assert pipeline._ground_answer(answer, [source]) != REFUSAL
 
 
 def test_discourse_connector_does_not_drop_supported_sentence():
@@ -726,9 +903,9 @@ def test_completeness_preserves_ghusl_qualification_and_timing():
     out = pipeline._augment_answer_completeness(
         "ما حكم الغسل يوم الجمعة؟", answer, [source],
     )
-    assert "مستحب" in out
+    assert "استحبابه" in out
     assert "الشارع" in out
-    assert "تاكيد استحبابه" in out
+    assert "تأكيد استحبابه" in out
     assert "بالفراغ من الصلاة" in out
     assert "(مصدر 1)" in out
 
@@ -825,7 +1002,7 @@ def test_generate_applies_source_completeness_after_grounding():
         result = pipeline.generate(
             "ما حكم الغسل يوم الجمعة؟", object(), [source], client,
         )
-    assert "مستحب" in result["answer"]
+    assert "استحبابه" in result["answer"]
     assert "بالفراغ من الصلاة" in result["answer"]
 
 
@@ -1168,6 +1345,13 @@ def test_grounding_expands_multi_source_citation_clusters():
     assert "خمس مرات" in out
 
 
+def test_citation_inside_quote_is_moved_after_closing_quote():
+    answer = 'قال النبي ﷺ: "أي آية من كتاب الله معك أعظم (مصدر 2)؟"'
+    out = pipeline._move_citations_out_of_quotes(answer)
+    assert 'أعظم؟" (مصدر 2)' in out
+    assert "(مصدر 2)؟\"" not in out
+
+
 def test_grounding_rejects_invalid_number_in_citation_cluster():
     source = _rag_chunk(
         "cluster_source",
@@ -1248,7 +1432,9 @@ def test_completeness_adds_ruling_when_answer_omits_it():
     out = pipeline._augment_answer_completeness(
         "ما حكم الغسل يوم الجمعة؟", answer, [source],
     )
-    assert "مستحب" in out
+    # The source's own explicit wording is "تأكيد استحبابه"; accepting that
+    # wording is more faithful than forcing the surface form "مستحب".
+    assert "استحبابه" in out
     assert "امر الشارع" in pipeline._fold_ar(pipeline.normalize(out))
 
 
@@ -1393,3 +1579,1166 @@ def test_generate_never_pairs_cross_prayer_heading_and_quote():
         )
     assert "**ركعتان قبل العصر**" in result["answer"]
     assert "قبل الظهر" not in result["answer"]
+
+
+def test_grounding_rejects_unsupported_construct_name_pair():
+    """A name like "أم الفضل" needs the full idafa pair in the source.
+
+    The source contains the common noun "فضل" (virtue), which used to satisfy
+    the follower-only entity check and let a fabricated name survive.
+    """
+    source = {
+        "id": "test-breastfeeding",
+        "original_text": (
+            "أرضعت امرأة النبي صلى الله عليه وسلم، وفضل الرضاع عظيم."
+        ),
+        "source": "hadith",
+        "reference": "test",
+    }
+    answer = "أرضعت النبي صلى الله عليه وسلم أم الفضل (مصدر 1)."
+    result = pipeline._ground_answer(answer, [source])
+    assert result == REFUSAL
+
+
+def test_grounding_accepts_supported_name_after_label_anchor():
+    source = {
+        "id": "test-halima",
+        "original_text": (
+            "أرضعت النبي صلى الله عليه وسلم امرأة تدعى حليمة السعدية."
+        ),
+        "source": "sira",
+        "reference": "test",
+    }
+    answer = "أرضعت النبي صلى الله عليه وسلم امرأة تدعى حليمة السعدية (مصدر 1)."
+    assert pipeline._ground_answer(answer, [source]) != REFUSAL
+
+
+def test_grounding_rejects_unsupported_name_even_in_lenient_mode():
+    source = {
+        "id": "test-foster",
+        "original_text": "أرضعت النبي صلى الله عليه وسلم امرأة من بني سعد.",
+        "source": "sira",
+        "reference": "test",
+    }
+    answer = "أرضعت النبي صلى الله عليه وسلم امرأة تدعى حليمة السعدية (مصدر 1)."
+    assert pipeline._ground_answer(answer, [source], ignore_rare=True) == REFUSAL
+
+
+def test_ordinal_label_does_not_require_matching_numeral():
+    """Sequence labels are not quantities.
+
+    "بيعة العقبة الثانية" and the source's "بيعة العقبة الأخيرة" name the
+    same event; the strict digit guard must still verify the real count (73)
+    without demanding a literal "2" from the source.
+    """
+    source = {
+        "id": "test-aqaba",
+        "original_text": (
+            "وكانوا ثلاثة وسبعين رجلا وامرأتين في بيعة العقبة الأخيرة."
+        ),
+        "source": "sira",
+        "reference": "أمر العقبة الثانية (4/12)",
+    }
+    answer = (
+        'كان عدد من بايع النبي في بيعة العقبة الثانية '
+        '"ثلاثة وسبعين رجلاً وامرأتين" (مصدر 1).'
+    )
+    assert pipeline._ground_answer(answer, [source]) != REFUSAL
+
+
+def test_quote_fallback_recovers_supported_paraphrase():
+    """A paraphrase in quotation marks must not discard a supported claim."""
+    source = {
+        "id": "test-tayammum",
+        "original_text": (
+            "سقط عقد عائشة فتخلفت لالتماسه فانطلق أبو بكر إليها "
+            "فتغيظ عليها في حبسها الناس فأنزل الله الرخصة في التيمم."
+        ),
+        "source": "hadith",
+        "reference": "test",
+    }
+    answer = (
+        'شرع التيمم عندما "سقط عقد عائشة فتخلفت للالتماس، '
+        'فانطلق أبو بكر إليها فغضب عليها في حبسها الناس، '
+        'فأنزل الله الرخصة في التيمم" (مصدر 1).'
+    )
+    out = pipeline._ground_with_heading_fallback(answer, [source], None)
+    assert out != REFUSAL
+    assert "التيمم" in out
+
+
+def test_tayammum_story_completeness_restores_lost_necklace_clause():
+    story = _rag_chunk(
+        "tayammum_story",
+        "خرجنا مع عائشة في بعض الأسفار، حتى إذا كنا بالبيداء "
+        "انقطع عقد لي، وليسوا على ماء.",
+        source="hadith",
+    )
+    disease = _rag_chunk(
+        "tayammum_disease",
+        "ويجوز التيمم إذا كان به جراحة أو مرض وخاف من استعمال الماء.",
+        source="fiqh",
+    )
+    answer = (
+        "أقام النبي صلى الله عليه وسلم على التماس العقد، وليسوا على ماء، "
+        "فأنزل الله آية التيمم (مصدر 1)."
+    )
+    out = pipeline._augment_answer_completeness(
+        "كيف شرع التيمم في سفر عائشة؟", answer, [story, disease],
+    )
+    # A narrative tayammum question needs the initiating event; merely
+    # "التماس العقد" (searching for it) does not say the necklace was lost.
+    # The disease cause belongs to the ruling question and must not be mixed.
+    assert "انقطع عقد" in out
+    assert "جراحة" not in out
+
+
+def test_tayammum_story_refusal_recovers_source_narrative():
+    source = _rag_chunk(
+        "tayammum_full_story",
+        "خرجنا مع عائشة في بعض الأسفار حتى إذا كنا بالبيداء انقطع عقد لي، "
+        "وأقام الناس معه وليسوا على ماء، فأنزل الله تعالى آية التيمم.",
+        source="fiqh",
+    )
+    out = pipeline._augment_answer_completeness(
+        "كيف شرع التيمم في سفر عائشة؟", REFUSAL, [source],
+    )
+    assert out != REFUSAL
+    assert "انقطع عقد" in out
+    assert "ليسوا على ماء" in out
+    assert "آية التيمم" in out
+
+
+def test_quote_fallback_keeps_rejecting_unsupported_claim():
+    source = {
+        "id": "test-unrelated",
+        "original_text": "الصلاة عمود الإسلام.",
+        "source": "hadith",
+        "reference": "test",
+    }
+    answer = '"سقط عقد عائشة فأنزل الله الرخصة في التيمم" (مصدر 1).'
+    assert pipeline._ground_with_heading_fallback(
+        answer, [source], None,
+    ) == REFUSAL
+
+
+def _quran_topic_chunks():
+    return [
+        {
+            "id": "quran_5_6", "source": "quran", "reference": "المائدة:6",
+            "original_text": "فاغسلوا وجوهكم وأيديكم إلى المرافق.",
+        },
+        {
+            "id": "quran_2_275", "source": "quran", "reference": "البقرة:275",
+            "original_text": "وأحل الله البيع وحرم الربا.",
+        },
+        {
+            "id": "quran_17_23", "source": "quran", "reference": "الإسراء:23",
+            "original_text": "وبالوالدين إحسانا.",
+        },
+    ]
+
+
+def test_quran_topic_anchor_wudu():
+    chunks = _quran_topic_chunks()
+    anchor = pipeline._resolve_quran_topic_anchor(
+        "كيف يتوضأ المسلم قبل الصلاة؟", chunks,
+    )
+    assert anchor is not None and anchor["id"] == "quran_5_6"
+
+
+def test_quran_topic_anchor_riba_and_parents():
+    chunks = _quran_topic_chunks()
+    assert pipeline._resolve_quran_topic_anchor(
+        "ما حكم الربا في القرآن الكريم؟", chunks,
+    )["id"] == "quran_2_275"
+    assert pipeline._resolve_quran_topic_anchor(
+        "كيف أمر الله بالإحسان إلى الوالدين؟", chunks,
+    )["id"] == "quran_17_23"
+
+
+def test_quran_topic_anchor_excluded_for_tafsir_and_unrelated():
+    chunks = _quran_topic_chunks()
+    assert pipeline._resolve_quran_topic_anchor(
+        "ما تفسير آية الربا؟", chunks,
+    ) is None
+    assert pipeline._resolve_quran_topic_anchor(
+        "كيف أستخدم بايثون لتحليل البيانات؟", chunks,
+    ) is None
+
+
+def test_quran_topic_anchor_excludes_arafah_fasting():
+    chunks = [
+        _rag_chunk(
+            "quran_2_183",
+            "كتب عليكم الصيام كما كتب على الذين من قبلكم",
+            source="quran",
+        ),
+    ]
+    assert pipeline._resolve_quran_topic_anchor(
+        "ما حكم صيام يوم عرفة؟", chunks,
+    ) is None
+    assert pipeline._resolve_quran_topic_anchor(
+        "لماذا فرض الله الصيام على المؤمنين؟", chunks,
+    )["id"] == "quran_2_183"
+
+
+def test_core_hadith_anchor_eight_gates():
+    chunks = [_rag_chunk(
+        "hadith_darimi_39619",
+        "للجنة ثمانية أبواب",
+        source="hadith",
+    )]
+    anchor = pipeline._resolve_core_hadith_anchor(
+        "كم عدد أبواب الجنة؟", chunks,
+    )
+    assert anchor is not None and anchor["id"] == "hadith_darimi_39619"
+
+
+@pytest.mark.parametrize("followup", [
+    "أيوة يعني حلال ولا حرام؟",
+    "ليه؟",
+    "ممكن توضح أكتر؟",
+    "طب إيه الحكم في الحالة دي؟",
+    "والرأي التاني إيه؟",
+])
+def test_history_aware_query_covers_egyptian_and_msa_followups(followup):
+    history = [
+        {"role": "user", "content": "حكم اللحية؟"},
+        {"role": "assistant", "content": "الحكم مبني على حديث إعفاء اللحية."},
+    ]
+    expanded = pipeline._history_aware_query(followup, history)
+    # Pure clarifications retrieve the prior substantive question only;
+    # generic polarity/discourse words must not dilute the query.
+    assert expanded == "حكم اللحية؟"
+
+
+@pytest.mark.parametrize("question", [
+    "ما حكم الربا؟",
+    "كيف يتوضأ المسلم؟",
+    "ما هي شروط وجوب الحج؟",
+    "من هو الرسول؟",
+    "ما هو القرآن؟",
+])
+def test_history_aware_query_does_not_hijack_new_topic(question):
+    history = [
+        {"role": "user", "content": "حكم اللحية؟"},
+        {"role": "assistant", "content": "الحكم مبني على حديث إعفاء اللحية."},
+    ]
+    assert pipeline._history_aware_query(question, history) == question
+
+
+def test_history_aware_query_resolves_attached_pronoun_without_conjunction():
+    history = [
+        {"role": "user", "content": "ما حكم صيام يوم عرفة؟"},
+        {"role": "assistant", "content": "صيام يوم عرفة مستحب لغير الحاج."},
+    ]
+    expanded = pipeline._history_aware_query("ما حكمه للحاج؟", history)
+    assert expanded.startswith("ما حكم صيام يوم عرفة؟")
+    assert "ما حكمه للحاج؟" in expanded
+
+
+def test_history_aware_query_resolves_demonstrative_with_qualifier():
+    history = [
+        {"role": "user", "content": "ما حكم صيام يوم عرفة؟"},
+        {"role": "assistant", "content": "صيام يوم عرفة مستحب لغير الحاج."},
+    ]
+    expanded = pipeline._history_aware_query("هل هذا الحديث صحيح؟", history)
+    assert expanded.startswith("ما حكم صيام يوم عرفة؟")
+    assert "هل هذا الحديث صحيح؟" in expanded
+
+
+def test_history_aware_query_walks_back_past_followups():
+    history = [
+        {"role": "user", "content": "حكم اللحية؟"},
+        {"role": "assistant", "content": "الحكم مبني على حديث إعفاء اللحية."},
+        {"role": "user", "content": "أيوة يعني حلال ولا حرام؟"},
+        {"role": "assistant", "content": "الإعفاء هو الحكم."},
+    ]
+    expanded = pipeline._history_aware_query("ليه؟", history)
+    assert expanded == "حكم اللحية؟"
+
+
+def test_history_aware_query_evidence_request_targets_previous_claim():
+    history = [
+        {"role": "user", "content": "ما حكم صيام الجمعة؟"},
+        {
+            "role": "assistant",
+            "content": (
+                "النهي عن صيام يوم الجمعة منفردًا للكراهة لا للتحريم "
+                "(مصدر 1). ومن وافق عادة له فلا يكره صيامه (مصدر 1)."
+            ),
+        },
+    ]
+    expanded = pipeline._history_aware_query("إيه الدليل؟", history)
+    assert "عادة" in expanded
+    assert "صيام" in expanded
+
+
+def test_history_aware_query_handles_malformed_history():
+    assert pipeline._history_aware_query("ليه؟", []) == "ليه؟"
+    assert pipeline._history_aware_query("ليه؟", None) == "ليه؟"
+    assert pipeline._history_aware_query("ليه؟", [None, {}, {"role": "user"}]) == "ليه؟"
+
+
+def test_history_aware_query_expands_short_followup():
+    history = [
+        {"role": "user", "content": "ما حكم صيام يوم عرفة؟"},
+        {"role": "assistant", "content": "صيام يوم عرفة مستحب لغير الحاج."},
+    ]
+    expanded = pipeline._history_aware_query("وما حكمه للحاج؟", history)
+    assert expanded.startswith("ما حكم صيام يوم عرفة؟")
+    assert "وما حكمه للحاج؟" in expanded
+
+
+def test_history_aware_query_leaves_standalone_question_unchanged():
+    history = [
+        {"role": "user", "content": "ما حكم صيام يوم عرفة؟"},
+    ]
+    question = "ما هي شروط وجوب الحج ومن يجب عليه؟"
+    assert pipeline._history_aware_query(question, history) == question
+    assert pipeline._history_aware_query("وما حكمه؟", None) == "وما حكمه؟"
+
+
+def test_retrieve_rewrites_and_boosts_resolved_followup_topic(monkeypatch):
+    rewritten = []
+    boosted = []
+    monkeypatch.setattr(
+        pipeline, "_resolve_chat_tafsir", lambda q, i, c, cl: ([], ""),
+    )
+    monkeypatch.setattr(pipeline, "_resolve_surah_query", lambda q, c: None)
+    monkeypatch.setattr(
+        pipeline, "_resolve_quran_topic_anchor", lambda q, c: None,
+    )
+    monkeypatch.setattr(
+        pipeline, "_resolve_core_hadith_anchor", lambda q, c: None,
+    )
+    monkeypatch.setattr(pipeline, "embed_text", lambda text, client: [0.1])
+    monkeypatch.setattr(pipeline, "search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(pipeline, "_bm25_search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        pipeline, "_rewrite_query",
+        lambda q, client: rewritten.append(q) or [],
+    )
+    monkeypatch.setattr(
+        pipeline, "_apply_lexical_boost",
+        lambda pool, q: boosted.append(q) or pool,
+    )
+    pipeline.retrieve(
+        "ليه؟", object(), [_rag_chunk("topic", "نص فقهي")], Mock(),
+        retrieval_query="ما حكم الربا؟",
+    )
+    assert rewritten == ["ما حكم الربا؟"]
+    assert boosted == ["ما حكم الربا؟"]
+
+
+def test_retrieve_embeds_resolved_followup_topic(monkeypatch):
+    texts = []
+    monkeypatch.setattr(
+        pipeline, "_resolve_chat_tafsir", lambda q, i, c, cl: ([], ""),
+    )
+    monkeypatch.setattr(pipeline, "_resolve_surah_query", lambda q, c: None)
+    monkeypatch.setattr(
+        pipeline, "_resolve_quran_topic_anchor", lambda q, c: None,
+    )
+    monkeypatch.setattr(
+        pipeline, "_resolve_core_hadith_anchor", lambda q, c: None,
+    )
+    monkeypatch.setattr(
+        pipeline, "embed_text",
+        lambda text, client: texts.append(text) or [0.1],
+    )
+    monkeypatch.setattr(pipeline, "search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(pipeline, "_bm25_search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(pipeline, "_rewrite_query", lambda q, client: [])
+    pipeline.retrieve(
+        "ليه؟", object(), [_rag_chunk("topic", "نص فقهي")], Mock(),
+        retrieval_query="ما حكم الربا؟",
+    )
+    assert len(texts) == 2
+    assert all("الربا" in text for text in texts)
+    assert all("ليه" not in text for text in texts)
+
+
+def test_followup_fallback_prefers_reason_sentence_for_why_question():
+    source = _rag_chunk(
+        "riba-reason-source",
+        "والسبب في تحريمه ما فيه من ضرر عظيم، وأنه يسبب العداوة بين الأفراد.",
+        source="fiqh",
+    )
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "ما حكم الربا؟"},
+        {
+            "role": "assistant",
+            "content": (
+                "حكم الربا هو التحريم (مصدر 1). "
+                "والسبب في تحريمه ما فيه من ضرر عظيم، "
+                "وأنه يسبب العداوة بين الأفراد (مصدر 1)."
+            ),
+        },
+    ]
+    fallback = pipeline._followup_fallback_answer(
+        "ليه؟", history, [source], [source],
+    )
+    assert fallback is not None
+    assert "السبب" in fallback
+    assert "العداوة" in fallback
+    assert pipeline._answer_citation_support_ok(
+        fallback, [source], threshold=0.65,
+    )
+
+
+def test_retrieve_uses_resolved_query_for_topic_anchors(monkeypatch):
+    seen = []
+    monkeypatch.setattr(
+        pipeline, "_resolve_chat_tafsir", lambda q, i, c, cl: ([], ""),
+    )
+    monkeypatch.setattr(pipeline, "_resolve_surah_query", lambda q, c: None)
+    monkeypatch.setattr(
+        pipeline, "_resolve_quran_topic_anchor",
+        lambda q, c: seen.append(q) or None,
+    )
+    monkeypatch.setattr(
+        pipeline, "_resolve_core_hadith_anchor",
+        lambda q, c: seen.append(q) or None,
+    )
+    monkeypatch.setattr(pipeline, "embed_text", lambda text, client: [0.1])
+    monkeypatch.setattr(pipeline, "search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(pipeline, "_bm25_search", lambda *args, **kwargs: [])
+    monkeypatch.setattr(pipeline, "_rewrite_query", lambda q, client: [])
+    pipeline.retrieve(
+        "ليه؟", object(), [_rag_chunk("topic", "نص فقهي")], Mock(),
+        retrieval_query="ما حكم الربا؟",
+    )
+    assert seen
+    assert all(query == "ما حكم الربا؟" for query in seen)
+
+
+def test_generate_resolves_tafsir_from_history_aware_query():
+    seen = []
+
+    def fake_resolve(query, index, chunks, client):
+        seen.append(query)
+        return [], ""
+
+    source = _rag_chunk(
+        "riba-source", "الربا محرم في الإسلام.", source="fiqh",
+    )
+    source.update(score=1.0, _gate_passed=True)
+    client = Mock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(
+            content="الربا محرم في الإسلام (مصدر 1)."
+        ))]
+    )
+    history = [
+        {"role": "user", "content": "ما حكم الربا؟"},
+        {"role": "assistant", "content": "الربا محرم (مصدر 1)."},
+    ]
+    with patch.object(pipeline, "_resolve_chat_tafsir", fake_resolve), \
+         patch.object(pipeline, "retrieve", return_value=[source]), \
+         patch.object(pipeline, "build_prompt", return_value=[]):
+        result = pipeline.generate(
+            "ليه؟", object(), [source], client, chat_history=history,
+        )
+    assert result["answer"]
+    assert seen == ["ما حكم الربا؟"]
+
+
+def test_generate_passes_history_aware_query_to_retrieval():
+    source = _rag_chunk(
+        "history-source",
+        "صيام يوم عرفة مستحب لغير الحاج.",
+        source="fiqh",
+    )
+    source.update(score=1.0, _gate_passed=True)
+    client = Mock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(
+            content="صيام يوم عرفة مستحب لغير الحاج (مصدر 1)."
+        ))]
+    )
+    history = [
+        {"role": "user", "content": "ما حكم صيام يوم عرفة؟"},
+        {"role": "assistant", "content": "مستحب لغير الحاج."},
+    ]
+    with patch.object(pipeline, "retrieve", return_value=[source]) as retrieve_mock, \
+         patch.object(pipeline, "build_prompt", return_value=[]):
+        result = pipeline.generate(
+            "وما حكمه للحاج؟", object(), [source], client,
+            chat_history=history,
+        )
+    assert result["answer"]
+    retrieval_query = retrieve_mock.call_args.kwargs.get("retrieval_query")
+    assert retrieval_query.startswith("ما حكم صيام يوم عرفة؟")
+    assert "وما حكمه للحاج؟" in retrieval_query
+
+
+def test_build_prompt_keeps_history_and_current_question_single():
+    chunk = _rag_chunk("prompt-source", "الصيام عبادة مشروعة.")
+    history = [
+        {"role": "user", "content": "سؤال سابق"},
+        {"role": "assistant", "content": "جواب سابق"},
+    ]
+    messages = pipeline.build_prompt(
+        "سؤال حالي", [chunk], chat_history=history,
+    )
+    assert messages[0]["role"] == "system"
+    assert any(
+        message["role"] == "user" and message["content"] == "سؤال سابق"
+        for message in messages
+    )
+    assert any(
+        message["role"] == "assistant" and message["content"] == "جواب سابق"
+        for message in messages
+    )
+    final_user = messages[-1]
+    assert final_user["role"] == "user"
+    assert final_user["content"].count("سؤال حالي") == 1
+    assert "سؤال سابق" not in final_user["content"]
+
+
+def test_followup_fallback_reuses_prior_grounded_ruling():
+    source = _rag_chunk(
+        "beard-source",
+        "أمر النبي صلى الله عليه وسلم بإحفاء الشوارب وإعفاء اللحية.",
+        source="hadith",
+    )
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "حكم اللحية؟"},
+        {
+            "role": "assistant",
+            "content": (
+                "حكم اللحية هو الإعفاء، وقد ورد في الحديث "
+                "أن النبي صلى الله عليه وسلم أمر بإعفاء اللحية (مصدر 1)."
+            ),
+        },
+    ]
+    fallback = pipeline._followup_fallback_answer(
+        "أيوة يعني حلال ولا حرام؟", history, [source], [source],
+    )
+    assert fallback is not None
+    assert "الإعفاء" in fallback
+    assert "(مصدر 1)" in fallback
+    assert pipeline._answer_citation_support_ok(fallback, [source])
+
+
+def test_followup_fallback_does_not_fire_for_unrelated_question():
+    source = _rag_chunk(
+        "beard-source",
+        "أمر النبي صلى الله عليه وسلم بإعفاء اللحية.",
+        source="hadith",
+    )
+    history = [
+        {"role": "user", "content": "حكم اللحية؟"},
+        {"role": "assistant", "content": "حكم اللحية هو الإعفاء (مصدر 1)."},
+    ]
+    assert pipeline._followup_fallback_answer(
+        "ما حكم الربا؟", history, [source], [source],
+    ) is None
+
+
+FRIDAY_FIQH_TEXT = (
+    "النهي عن صوم يوم الجمعة منفردا: ذهب الجمهور إلى أن النهي "
+    "للكراهة لا للتحريم، إلا إذا صام يوما قبله أو يوما بعده، أو "
+    "وافق عادة له، أو كان يوم عرفة أو عاشوراء، فإنه حينئذ لا يكره "
+    "صيامه."
+)
+FRIDAY_PRIOR_ANSWER = (
+    "حكم صيام يوم الجمعة هو النهي عن صيامه منفردًا (مصدر 1). "
+    "الجمهور من العلماء يرون أن النهي للكراهة لا للتحريم، إلا إذا "
+    "صام يومًا قبله أو يومًا بعده، أو وافق عادة له، أو كان يوم "
+    "عرفة أو عاشوراء، فإنه حينئذ لا يكره صيامه (مصدر 1)."
+)
+
+
+def _generate_with_mock(
+    query, source, answer, history=None, retrieve_mock=None,
+):
+    client = Mock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=answer))]
+    )
+    with patch.object(
+        pipeline, "_resolve_chat_tafsir", return_value=([], ""),
+    ), patch.object(
+        pipeline, "retrieve", return_value=[source],
+    ) as mocked, patch.object(pipeline, "build_prompt", return_value=[]):
+        result = pipeline.generate(
+            query, object(), [source], client, chat_history=history,
+        )
+    if retrieve_mock is not None:
+        retrieve_mock.append(mocked.call_args.kwargs.get("retrieval_query"))
+    return result
+
+
+def test_legal_modality_extraction_distinguishes_families():
+    assert "obligation" in pipeline._positive_legal_families(
+        "فعليه أن يصوم"
+    )
+    assert "obligation" not in pipeline._positive_legal_families("لا يجب")
+    assert "prohibition" in pipeline._positive_legal_families("لا يجوز")
+    assert "prohibition" not in pipeline._positive_legal_families("يكره")
+
+
+def test_friday_followup_rejects_unconditional_obligation():
+    source = _rag_chunk("friday_fiqh", FRIDAY_FIQH_TEXT)
+    source["reference"] = "فقه السنة، سيد سيد سابق، الصيام - الأيام المنهي عن صيامها (1/3)"
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "ما حكم صيام الجمعة؟"},
+        {"role": "assistant", "content": FRIDAY_PRIOR_ANSWER},
+    ]
+    seen = []
+    result = _generate_with_mock(
+        "يعني لازم أصوم يوم قبله أو بعده؟",
+        source,
+        "نعم، يجب صيام يوم الجمعة مع يوم قبله أو يوم بعده (مصدر 1).",
+        history=history,
+        retrieve_mock=seen,
+    )
+    answer = result["answer"]
+    assert seen == ["ما حكم صيام الجمعة؟"]
+    assert "لا توجب" in answer
+    assert "الكراهة" in answer or "لا يكره" in answer
+    assert "obligation" not in pipeline._positive_legal_families(answer)
+    assert "(مصدر 1)" in answer
+
+
+def test_day_qualified_fast_filters_prayer_and_general_ramadan_verses():
+    prayer = _rag_chunk(
+        "quran_62_9",
+        "يا أيها الذين آمنوا إذا نودي للصلاة من يوم الجمعة فاسعوا إلى ذكر الله",
+        source="quran",
+    )
+    ramadan = _rag_chunk(
+        "quran_2_183",
+        "يا أيها الذين آمنوا كتب عليكم الصيام كما كتب على الذين من قبلكم",
+        source="quran",
+    )
+    fiqh = _rag_chunk("friday_fiqh_filter", FRIDAY_FIQH_TEXT)
+    kept = pipeline._filter_joint_evidence(
+        [prayer, ramadan, fiqh], "ما حكم صيام الجمعة؟",
+    )
+    assert [c["id"] for c in kept] == ["friday_fiqh_filter"]
+    assert pipeline._filter_joint_evidence(
+        [ramadan], "ما حكم صيام رمضان؟",
+    )
+    assert pipeline._filter_joint_evidence(
+        [prayer], "ما حكم صلاة الجمعة؟",
+    )
+    assert not pipeline._filter_joint_evidence(
+        [prayer], "ما حكم صيام الخميس؟",
+    )
+
+
+def test_quran_friday_prayer_not_anchored_for_fasting_question():
+    prayer = _rag_chunk(
+        "quran_62_9",
+        "يا أيها الذين آمنوا إذا نودي للصلاة من يوم الجمعة فاسعوا إلى ذكر الله",
+        source="quran",
+    )
+    prayer["reference"] = "الجمعة:9"
+    assert pipeline._resolve_quran_topic_anchor(
+        "ما حكم صيام الجمعة؟", [prayer],
+    ) is None
+    assert pipeline._resolve_quran_topic_anchor(
+        "ما حكم صلاة الجمعة؟", [prayer],
+    ) is not None
+
+
+def test_friday_first_answer_keeps_fiqh_qualification():
+    source = _rag_chunk("friday_full", FRIDAY_FIQH_TEXT)
+    source.update(score=1.0, _gate_passed=True)
+    answer = (
+        "وذهب الجمهور إلى أن النهي للكراهة لا للتحريم، إلا إذا صام "
+        "يوما قبله أو يوما بعده، أو وافق عادة له (مصدر 1)."
+    )
+    client = Mock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=answer))]
+    )
+    with patch.object(
+        pipeline, "_resolve_chat_tafsir", return_value=([], ""),
+    ), patch.object(pipeline, "retrieve", return_value=[source]), \
+         patch.object(pipeline, "build_prompt", return_value=[]):
+        result = pipeline.generate(
+            "ما حكم صيام الجمعة؟", object(), [source], client,
+        )
+    assert "كراه" in result["answer"]
+    assert "عادة" in result["answer"]
+
+
+def test_habit_followup_uses_habit_exception_without_condition():
+    source = _rag_chunk("friday_habit", FRIDAY_FIQH_TEXT)
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "ما حكم صيام الجمعة؟"},
+        {"role": "assistant", "content": "لا يجب صيام يوم الجمعة (مصدر 1)."},
+        {"role": "user", "content": "يعني لازم أصوم يوم قبله أو بعده؟"},
+        {"role": "assistant", "content": "المصادر لا توجب ذلك (مصدر 1)."},
+    ]
+    out = pipeline._followup_fallback_answer(
+        "طب لو أنا متعود أصوم يوم الجمعة؟",
+        history, [source], [source],
+    )
+    assert out is not None
+    assert "عادة" in out
+    assert "بشرط" not in out
+    assert "obligation" not in pipeline._positive_legal_families(out)
+
+
+def test_unsupported_condition_is_not_grounded():
+    source = _rag_chunk(
+        "friday_condition",
+        "أو وافق عادة له، أو كان يوم عرفة أو عاشوراء، فإنه حينئذ لا يكره صيامه.",
+    )
+    answer = (
+        "إذا كنت متعودًا على صيام يوم الجمعة، فلا حرج في ذلك بشرط "
+        "أن تصوم قبله يومًا أو بعده يومًا (مصدر 1)."
+    )
+    result = pipeline._ground_answer(answer, [source], [source])
+    assert result == REFUSAL
+
+
+def test_evidence_request_returns_hadith_plus_habit_evidence():
+    source = _rag_chunk(
+        "friday_evidence",
+        'وفي الصحيحين من حديث جابر رضي الله عنه أن النبي صلى الله '
+        'عليه وسلم قال: "لا تصوموا يوم الجمعة، إلا وقبله يوم، أو '
+        'بعده يوم". وذهب الجمهور إلى أن النهي للكراهة لا للتحريم '
+        'إلا إذا صام يوما قبله أو يوما بعده، أو وافق عادة له.',
+    )
+    history = [
+        {"role": "user", "content": "ما حكم صيام الجمعة؟"},
+        {"role": "assistant", "content": "لا يجب صيام يوم الجمعة (مصدر 1)."},
+        {"role": "user", "content": "طب لو أنا متعود أصوم يوم الجمعة؟"},
+        {
+            "role": "assistant",
+            "content": (
+                "وذهب الجمهور إلى أن النهي للكراهة لا للتحريم إلا "
+                "إذا صام يوما قبله أو يوما بعده، أو وافق عادة له "
+                "(مصدر 1)."
+            ),
+        },
+    ]
+    out = pipeline._followup_fallback_answer(
+        "إيه الدليل؟", history, [source], [source],
+    )
+    assert out is not None
+    assert "الصحيحين" in out or "قال" in out
+    assert "عادة" in out
+    assert "مصدر 1" in out
+
+
+def test_evidence_request_rejects_unrelated_tashreeq_hadith():
+    source = _rag_chunk(
+        "friday_and_tashreeq",
+        "وروى الطبراني أن لا تصوموا هذه الأيام فإنها أيام أكل وشرب. "
+        "النهي عن صوم يوم الجمعة منفردا: وذهب الجمهور إلى أن النهي "
+        "للكراهة لا للتحريم إلا إذا صام يوما قبله أو يوما بعده، أو "
+        "وافق عادة له. وفي الصحيحين من حديث جابر أن النبي صلى الله "
+        'عليه وسلم قال: "لا تصوموا يوم الجمعة، إلا وقبله يوم، أو '
+        'بعده يوم".',
+    )
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "يعني لازم أصوم يوم قبله أو بعده؟"},
+        {"role": "assistant", "content": "المصادر لا توجب ذلك (مصدر 1)."},
+        {"role": "user", "content": "طب لو أنا متعود أصوم يوم الجمعة؟"},
+        {
+            "role": "assistant",
+            "content": (
+                "وذهب الجمهور إلى أن النهي للكراهة لا للتحريم إلا "
+                "إذا صام يوما قبله أو يوما بعده، أو وافق عادة له "
+                "(مصدر 1)."
+            ),
+        },
+    ]
+    answer = (
+        "وروى الطبراني أن لا تصوموا هذه الأيام فإنها أيام أكل وشرب "
+        "(مصدر 1)."
+    )
+    client = Mock()
+    client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=answer))]
+    )
+    with patch.object(
+        pipeline, "_resolve_chat_tafsir", return_value=([], ""),
+    ), patch.object(pipeline, "retrieve", return_value=[source]), \
+         patch.object(pipeline, "build_prompt", return_value=[]):
+        result = pipeline.generate(
+            "إيه الدليل؟", object(), [source], client,
+            chat_history=history,
+        )
+    assert "أيام التشريق" not in result["answer"]
+    assert (
+        "الصحيحين" in result["answer"]
+        or "لا تصوموا يوم الجمعة" in result["answer"]
+    )
+    assert "عادة" in result["answer"]
+
+
+def test_ordinary_dislike_verb_is_not_a_legal_modality():
+    assert "dislike" not in pipeline._positive_legal_families(
+        "تعريف الغيبة هو ذكرك أخاك بما يكره"
+    )
+    assert "dislike" in pipeline._positive_legal_families(
+        "يكره صيام يوم الجمعة منفردا"
+    )
+
+
+def test_condition_only_source_supports_travel_completeness():
+    source = _rag_chunk(
+        "travel_condition",
+        "ذهب جمهور العلماء إلى أن قصر الصلاة يشرع بمفارقة الحضر "
+        "والخروج من البلد وأن ذلك شرط ولا يتم حتى يدخل أو بيوتها.",
+    )
+    answer = (
+        "المسافر يقصر الصلاة ما دام مسافرا، حتى لو أقام لحاجة "
+        "ينتظر قضاءها (مصدر 1)."
+    )
+    out = pipeline._augment_answer_completeness(
+        "متى يقصر المسافر الصلاة؟", answer, [source],
+    )
+    assert "مفارقة الحضر" in out
+
+
+def test_condition_list_completeness_includes_all_items():
+    source = _rag_chunk(
+        "hajj_conditions",
+        "اتفق الفقهاء على أنه يشترط لوجوب الحج، الشرط الاتية: "
+        "١ - الاسلام. ٢ - البلوغ. ٣ - العقل. ٤ - الحرية. "
+        "٥ - الاستطاعة. فمن لم تتحقق فيه هذه الشروط، فلا يجب عليه الحج.",
+    )
+    answer = (
+        "**الإسلام**: فلا يجب الحج على غير المسلم (مصدر 1). "
+        "**البلوغ**: فلا يجب الحج على الصبي حتى يبلغ (مصدر 1)."
+    )
+    out = pipeline._augment_answer_completeness(
+        "ما شروط وجوب الحج؟", answer, [source],
+    )
+    assert "العقل" in out
+    assert "الاستطاعة" in out
+
+
+def test_tayammum_narrative_adds_missing_water_cause():
+    source = _rag_chunk(
+        "tayammum_water",
+        "خرجنا مع النبي صلى الله عليه وسلم في بعض أسفاره حتى إذا كنا "
+        "بالبيداء انقطع عقد لي، فأقام النبي صلى الله عليه وسلم على "
+        "التماسه، وأقام الناس معه، وليسوا على ماء، وليس معهم ماء، "
+        "فأنزل الله آية التيمم.",
+        source="fiqh",
+    )
+    answer = (
+        "خرجنا مع النبي صلى الله عليه وسلم في بعض أسفاره حتى إذا كنا "
+        "بالبيداء انقطع عقد لي (مصدر 1). فأنزل الله آية التيمم (مصدر 1)."
+    )
+    out = pipeline._augment_answer_completeness(
+        "كيف شرع التيمم في سفر عائشة؟", answer, [source],
+    )
+    assert "ليسوا على ماء" in out or "ليس معهم ماء" in out
+
+
+def test_obligation_followup_after_recommendation_stays_non_obligatory():
+    source = _rag_chunk("monday_fast", "صيام يوم الاثنين مستحب.")
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "ما حكم صيام يوم الاثنين؟"},
+        {"role": "assistant", "content": "صيام يوم الاثنين مستحب (مصدر 1)."},
+    ]
+    result = _generate_with_mock(
+        "هل ده واجب؟", source,
+        "نعم، يجب صيامه (مصدر 1).", history=history,
+    )
+    answer = result["answer"]
+    assert "لا توجب" in answer
+    assert "مستحب" in answer
+    assert "obligation" not in pipeline._positive_legal_families(answer)
+
+
+def test_prohibition_followup_preserves_qualified_dislike():
+    source = _rag_chunk(
+        "friday_dislike", "إفراد يوم الجمعة بالصوم مكروه عند الجمهور.",
+    )
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "ما حكم إفراد الجمعة بالصوم؟"},
+        {
+            "role": "assistant",
+            "content": "إفراد يوم الجمعة بالصوم مكروه عند الجمهور (مصدر 1).",
+        },
+    ]
+    result = _generate_with_mock(
+        "يعني حرام؟", source, "نعم، حرام (مصدر 1).", history=history,
+    )
+    answer = result["answer"]
+    assert "لا تحرم" in answer
+    assert "مكروه" in answer
+    assert "prohibition" not in pipeline._positive_legal_families(answer)
+
+
+def test_disputed_followup_does_not_present_one_opinion_as_consensus():
+    source = _rag_chunk(
+        "friday_dispute",
+        "إفراد يوم الجمعة بالصوم مكروه عند الجمهور، وذهب آخرون إلى تحريمه.",
+    )
+    source.update(score=1.0, _gate_passed=True)
+    prior = (
+        "إفراد يوم الجمعة بالصوم مكروه عند الجمهور، وذهب آخرون إلى "
+        "تحريمه (مصدر 1)."
+    )
+    history = [
+        {"role": "user", "content": "ما حكم إفراد الجمعة بالصوم؟"},
+        {"role": "assistant", "content": prior},
+    ]
+    result = _generate_with_mock(
+        "يعني حرام؟", source, "نعم، حرام (مصدر 1).", history=history,
+    )
+    answer = result["answer"]
+    # The answer may state the disagreement directly instead of using the
+    # generic lead, but it must not flatten the issue to "نعم، حرام".
+    assert "آخرون" in answer or "المسألة محل خلاف" in answer
+    assert "مكروه" in answer and "تحريم" in answer
+    assert "نعم، حرام" not in answer
+
+
+def test_hadith_wording_does_not_establish_obligation_by_itself():
+    source = _rag_chunk(
+        "friday_hadith",
+        'قال رسول الله صلى الله عليه وسلم: "لا تصوموا يوم الجمعة '
+        'إلا وقبله يوم أو بعده يوم".',
+        source="hadith",
+    )
+    source["reference"] = "صحيح مسلم:2568"
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "ما حكم صيام الجمعة؟"},
+        {
+            "role": "assistant",
+            "content": (
+                'قال رسول الله صلى الله عليه وسلم: "لا تصوموا يوم '
+                'الجمعة إلا وقبله يوم أو بعده يوم" (مصدر 1).'
+            ),
+        },
+    ]
+    result = _generate_with_mock(
+        "يعني لازم أصوم يوم قبله أو بعده؟", source,
+        "نعم، يجب صيام يوم قبله أو بعده (مصدر 1).",
+        history=history,
+    )
+    answer = result["answer"]
+    assert "لا توجب" in answer
+    assert "لا تصوموا يوم الجمعة" in answer
+    assert "obligation" not in pipeline._positive_legal_families(answer)
+
+
+def test_explicit_obligation_is_not_made_hesitant():
+    source = _rag_chunk("ramadan_obligation", "صيام رمضان واجب على كل مسلم بالغ.")
+    source.update(score=1.0, _gate_passed=True)
+    result = _generate_with_mock(
+        "هل يجب صيام رمضان؟", source,
+        "نعم، يجب صيام رمضان (مصدر 1).",
+    )
+    answer = result["answer"]
+    assert "obligation" in pipeline._positive_legal_families(answer)
+    assert "لا توجب" not in answer
+
+
+def test_unrelated_new_question_does_not_inherit_legal_lead():
+    source = _rag_chunk("ramadan_obligation2", "صيام رمضان واجب على كل مسلم بالغ.")
+    source.update(score=1.0, _gate_passed=True)
+    history = [
+        {"role": "user", "content": "ما حكم صيام الجمعة؟"},
+        {"role": "assistant", "content": FRIDAY_PRIOR_ANSWER},
+    ]
+    seen = []
+    result = _generate_with_mock(
+        "ما حكم صيام رمضان؟", source,
+        "صيام رمضان واجب على كل مسلم بالغ (مصدر 1).",
+        history=history, retrieve_mock=seen,
+    )
+    answer = result["answer"]
+    assert seen == ["ما حكم صيام رمضان؟"]
+    assert "لا توجب" not in answer
+    assert "obligation" in pipeline._positive_legal_families(answer)
+
+
+def test_citation_alignment_for_hadith_quote_and_fiqh_interpretation():
+    hadith = _rag_chunk(
+        "friday_quote_hadith",
+        'قال رسول الله صلى الله عليه وسلم: "لا تصوموا يوم الجمعة '
+        'إلا وقبله يوم أو بعده يوم".',
+        source="hadith",
+    )
+    hadith["reference"] = "صحيح مسلم:2568"
+    fiqh = _rag_chunk(
+        "friday_interpretation",
+        "النهي عن إفراد الجمعة بالصوم للكراهة لا للتحريم.",
+    )
+    answer = (
+        'قال النبي صلى الله عليه وسلم: "لا تصوموا يوم الجمعة إلا '
+        'وقبله يوم أو بعده يوم". النهي عن إفراد الجمعة بالصوم للكراهة '
+        'لا للتحريم.'
+    )
+    out = pipeline._add_missing_citations(answer, [hadith, fiqh])
+    assert out.index("(مصدر 1)") < out.index("(مصدر 2)")
+    assert "لا للتحريم (مصدر 2)" in out
+
+
+def test_build_prompt_adds_followup_context_note():
+    chunk = _rag_chunk("followup-prompt-source", "إعفاء اللحية ورد في الحديث.")
+    history = [
+        {"role": "user", "content": "حكم اللحية؟"},
+        {"role": "assistant", "content": "الحكم هو الإعفاء."},
+    ]
+    messages = pipeline.build_prompt(
+        "أيوة يعني حلال ولا حرام؟", [chunk], chat_history=history,
+    )
+    final_user = messages[-1]["content"]
+    assert "ملاحظة سياق" in final_user
+    assert "حكم اللحية؟" in final_user
+    assert final_user.count("أيوة يعني حلال ولا حرام؟") == 1
+
+
+def test_core_hadith_anchor_names_of_allah():
+    chunks = [_rag_chunk(
+        "hadith_bukhari_2624",
+        "إن لله تسعة وتسعين اسما مائة إلا واحدا من أحصاها دخل الجنة",
+        source="hadith",
+    )]
+    anchor = pipeline._resolve_core_hadith_anchor(
+        "كم عدد أسماء الله الحسنى؟", chunks,
+    )
+    assert anchor is not None and anchor["id"] == "hadith_bukhari_2624"
+
+
+def _quran_anchor_chunks():
+    verse = (
+        "وقضى ربك ألا تعبدوا إلا إياه وبالوالدين إحسانا "
+        "فلا تقل لهما أف ولا تنهرهما وقل لهما قولا كريما."
+    )
+    return [{
+        "id": "quran_17_23", "source": "quran", "reference": "الإسراء:23",
+        "original_text": verse,
+        "metadata": {"surah_name": "الإسراء", "ayah_number": 23},
+        "_injected": True,
+    }]
+
+
+def test_quran_anchor_completeness_recovers_false_refusal():
+    chunks = _quran_anchor_chunks()
+    out = pipeline._augment_answer_completeness(
+        "كيف أمر الله بالإحسان إلى الوالدين؟", REFUSAL, chunks,
+    )
+    assert out != REFUSAL
+    assert "وبالوالدين إحسانا" in out
+    assert "(مصدر 1)" in out
+
+
+def test_quran_anchor_completeness_adds_missing_verse_clause():
+    chunks = _quran_anchor_chunks()
+    partial = (
+        'أمر الله بالإحسان إلى الوالدين في قوله: '
+        '"وقضى ربك ألا تعبدوا إلا إياه وبالوالدين إحسانا" (مصدر 1).'
+    )
+    out = pipeline._augment_answer_completeness(
+        "كيف أمر الله بالإحسان إلى الوالدين؟", partial, chunks,
+    )
+    assert "فلا تقل لهما أف" in out
+    assert "وقل لهما قولا كريما" in out
+
+
+def test_quran_anchor_completeness_skips_tafsir_intent():
+    chunks = _quran_anchor_chunks()
+    assert pipeline._quran_topic_anchor_verse(
+        "ما تفسير آية الوالدين؟", chunks,
+    ) is None
+
+
+def test_quran_wudu_fragment_suppresses_duplicate_full_verse():
+    verse = (
+        "يا أيها الذين آمنوا إذا قمتم إلى الصلاة فاغسلوا وجوهكم "
+        "وأيديكم إلى المرافق وامسحوا برؤوسكم وأرجلكم إلى الكعبين "
+        "وإن كنتم جنبا فاطهروا"
+    )
+    chunk = {
+        "id": "quran_5_6", "source": "quran", "reference": "المائدة:6",
+        "original_text": verse,
+        "metadata": {"surah_name": "المائدة", "ayah_number": 6},
+        "_injected": True,
+    }
+    answer = (
+        'قال الله تعالى: "يا أيها الذين آمنوا إذا قمتم إلى الصلاة '
+        "فاغسلوا وجوهكم وأيديكم إلى المرافق وامسحوا برؤوسكم وأرجلكم "
+        'إلى الكعبين" (المائدة:6) (مصدر 1).'
+    )
+    out = pipeline._augment_answer_completeness(
+        "كيف يتوضأ المسلم قبل الصلاة؟", answer, [chunk],
+    )
+    assert "جنبا" not in out
+
+
+def test_ayat_al_kursi_label_comes_from_tafsir_evidence():
+    quran = {
+        "id": "quran_2_255", "source": "quran", "reference": "البقرة:255",
+        "original_text": "الله لا إله إلا هو الحي القيوم",
+        "metadata": {"surah_number": 2, "ayah_number": 255},
+        "_injected": True,
+    }
+    tafsir = {
+        "id": "tafsir_ibnkathir_2_255", "source": "tafsir",
+        "reference": "تفسير ابن كثير 2:255",
+        "original_text": (
+            "هذه آية الكرسي ولها شأن عظيم، قد صح الحديث عن رسول الله "
+            "صلى الله عليه وسلم بأنها أفضل آية في كتاب الله."
+        ),
+    }
+    assert pipeline._quran_topic_companions(
+        quran, [quran, tafsir],
+    )[0]["id"] == "tafsir_ibnkathir_2_255"
+    answer = 'قال الله تعالى: "الله لا إله إلا هو الحي القيوم" (مصدر 1).'
+    out = pipeline._augment_answer_completeness(
+        "ما أعظم آية في القرآن الكريم؟", answer, [quran, tafsir],
+    )
+    assert "آية الكرسي" in out
+
+
+def test_zakat_fitr_completeness_adds_measure_and_deadline():
+    source = {
+        "id": "fiqh-zakat", "source": "fiqh", "reference": "زكاة الفطر",
+        "original_text": (
+            "زكاة الفطر واجبة على كل مسلم. "
+            "والواجب فيها صاع من طعام. "
+            "أمرنا رسول الله صلى الله عليه وسلم بزكاة الفطر أن تؤدى "
+            "قبل خروج الناس إلى الصلاة."
+        ),
+    }
+    answer = "زكاة الفطر واجبة على كل مسلم (مصدر 1)."
+    out = pipeline._augment_answer_completeness(
+        "ما حكم زكاة الفطر ومتى تجب؟", answer, [source],
+    )
+    assert "صاع" in out
+    assert "قبل خروج الناس" in out
+
+
+def test_zakat_timing_snippet_does_not_begin_mid_quote():
+    source = {
+        "id": "fiqh-zakat-long", "source": "fiqh", "reference": "زكاة الفطر",
+        "original_text": (
+            'روى ابن عباس قال: "فرض رسول الله صلى الله عليه وسلم زكاة '
+            "الفطر طهرة للصائم، من اللغو والرفث وطعمة للمساكين، من أداها "
+            'قبل الصلاة، فهي زكاة مقبولة، ومن أداها بعد الصلاة، فهي صدقة '
+            'من الصدقات".'
+        ),
+    }
+    answer = "زكاة الفطر واجبة على كل مسلم (مصدر 1)."
+    out = pipeline._augment_answer_completeness(
+        "ما حكم زكاة الفطر ومتى تجب؟", answer, [source],
+    )
+    assert "من أداها قبل الصلاة" in out
+    assert "من اللغو والرفث" not in out
+    assert "(مصدر 1)" in out

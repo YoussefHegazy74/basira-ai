@@ -16,8 +16,14 @@ const createConversation = asyncWrapper(async (req, res, next) => {
 
 //  get user conversations
 const getUserConversations = asyncWrapper(async (req, res, next) => {
-  const page = parseInt(req.query.page) || 1;
-  const limit = parseInt(req.query.limit) || 10;
+  // Bound pagination so an authenticated client cannot request an
+  // arbitrarily large page or negative skip.
+  const parsedPage = Number.parseInt(req.query.page, 10);
+  const parsedLimit = Number.parseInt(req.query.limit, 10);
+  const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.min(50, Math.max(1, parsedLimit))
+    : 10;
   const conversations = await conversationService.getUserConversations(
     req.user._id,
     page,

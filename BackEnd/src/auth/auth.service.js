@@ -81,12 +81,13 @@ const login = async (userData) => {
     throw new AppError(401, "Incorrect email or password", HttpStatus.FAIL);
   }
 
+  // Deactivation must not be reversible by logging in again.  Only an admin
+  // reactivation flow may set isActive back to true.
+  if (!user.isActive) {
+    throw new AppError(403, "Account is deactivated", HttpStatus.FAIL);
+  }
+
   const token = signToken(user._id);
-
-  user.isActive = true;
-  user.expiresAt = undefined;
-
-  await user.save({ validateBeforeSave: false });
 
   return {
     token,
@@ -104,9 +105,9 @@ const forgotPassword = async (req, res) => {
   ///1 check if user exist
 
   const user = await User.findOne({ email: req.body.email });
-  if (!user) {
-    throw new AppError(404, "User not found", HttpStatus.FAIL);
-  }
+  // Do not reveal whether an account exists.  The controller always returns
+  // the same generic message for known and unknown addresses.
+  if (!user) return;
   const resetToken = user.createPasswordResetToken();
   await user.save({ validateBeforeSave: false });
   const resetURL = `${process.env.FRONTEND_URL}/auth/resetpassword/${resetToken}`;
@@ -253,8 +254,6 @@ const resetPassword = async (token, newPassword, newPasswordConfirm) => {
   user.resetPasswordToken = undefined;
   user.resetPasswordTokenExpiresAt = undefined;
   user.passwordChangedAt = Date.now() - 1000;
-  user.isActive = true;
-  user.expiresAt = undefined;
   await user.save();
 };
 /// change password
@@ -329,7 +328,7 @@ const logout = async (req, res) => {
   res.clearCookie("token", {
     httpOnly: true,
     sameSite: "lax",
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
   });
   return;
 };
@@ -343,6 +342,20 @@ const deactivateAccount = async (userId) => {
 
   if (!user.isActive) {
     throw new AppError(400, "Account is already deactivated", HttpStatus.FAIL);
+  }
+
+  if (user.role === "admin") {
+    const otherAdmins = await User.countDocuments({
+      role: "admin",
+      _id: { $ne: user._id },
+    });
+    if (otherAdmins === 0) {
+      throw new AppError(
+        400,
+        "Cannot deactivate the last administrator",
+        HttpStatus.BAD_REQUEST,
+      );
+    }
   }
 
   user.isActive = false;

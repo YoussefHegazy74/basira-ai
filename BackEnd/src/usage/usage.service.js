@@ -1,21 +1,15 @@
 const Usage = require("./usage.model");
-const AppError = require("../utils/AppError.js");
-const HttpStatus = require("../utils/HttpStatusText.js");
-
-const Guest_Usage_limit = 5;
-const User_Usage_limit = 10;
 
 ////////// identify consumer
-const identify = (UserId, guestKey) => {
-  return UserId
-    ? { ownerKey: UserId, limit: User_Usage_limit }
-    : { ownerKey: guestKey, limit: Guest_Usage_limit };
+const identify = (userId, guestKey) => {
+  return { ownerKey: String(userId || guestKey) };
 };
-////////// consume one usage
-const consume = async (ownerKey, limit) => {
+
+////////// record one usage without enforcing a daily cap
+const consume = async (ownerKey) => {
   const increment = () =>
     Usage.findOneAndUpdate(
-      { ownerKey, expiresAt: { $gt: new Date() }, count: { $lt: limit } },
+      { ownerKey, expiresAt: { $gt: new Date() } },
       { $inc: { count: 1 } },
     );
   if (await increment()) return;
@@ -31,8 +25,9 @@ const consume = async (ownerKey, limit) => {
 
   if (await increment()) return;
 
-  throw new AppError(429, "Daily usage limit reached", HttpStatus.FAIL);
+  await Usage.updateOne({ ownerKey }, { $inc: { count: 1 } });
 };
+
 ////////// get usage for a user
 const getUsage = async (userId) => {
   const usage = await Usage.findOne({
@@ -40,12 +35,8 @@ const getUsage = async (userId) => {
     expiresAt: { $gt: new Date() },
   }).lean();
 
-  const used = usage ? usage.count : 0;
-
   return {
-    limit: User_Usage_limit,
-    used,
-    remaining: Math.max(User_Usage_limit - used, 0),
+    used: usage ? usage.count : 0,
     resetsAt: usage ? usage.expiresAt : null,
   };
 };

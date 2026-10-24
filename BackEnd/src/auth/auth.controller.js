@@ -19,7 +19,8 @@ const login = asyncWrapper(async (req, res, next) => {
     httpOnly: true,
     sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000,
-    secure: true,
+    // Secure cookies require HTTPS; keep local HTTP development usable.
+    secure: process.env.NODE_ENV === "production",
   });
 
   res.status(200).json({
@@ -56,7 +57,8 @@ const changePassword = asyncWrapper(async (req, res, next) => {
     httpOnly: true,
     sameSite: "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000,
-    secure: true,
+    // Secure cookies require HTTPS; keep local HTTP development usable.
+    secure: process.env.NODE_ENV === "production",
   });
   res.status(200).json({
     status: HttpStatus.SUCCESS,
@@ -80,6 +82,11 @@ const logout = asyncWrapper(async (req, res, next) => {
 /// deactivate account
 const deactivateAccount = asyncWrapper(async (req, res, next) => {
   await AuthService.deactivateAccount(req.user._id);
+  res.clearCookie("token", {
+    httpOnly: true,
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+  });
   res.status(200).json({
     status: HttpStatus.SUCCESS,
     message: "Account has been deactivated successfully.",

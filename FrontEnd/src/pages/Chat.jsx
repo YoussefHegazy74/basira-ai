@@ -2,6 +2,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import {
+  buildChatHistory,
+  makeClientMessageId,
+  mapStoredMessages,
+  mergeServerMessages,
+  readActiveConversation,
+  readFailedSubmission,
+  writeActiveConversation,
+  writeFailedSubmission,
+} from "../utils/chatHistory";
+import { citationSegments } from "../utils/citations";
 
 function Chat() {
   const { user, authLoading } = useAuth();
@@ -15,9 +26,11 @@ function Chat() {
   const [isOpeningConversation, setIsOpeningConversation] = useState(false);
   const [editingConversationId, setEditingConversationId] = useState(null);
   const [deletingConversationId, setDeletingConversationId] = useState(null);
+  const [failedSubmission, setFailedSubmission] = useState(null);
 
   const textareaRef = useRef(null);
   const messagesEndRef = useRef(null);
+  const restoredConversationRef = useRef(false);
 
   useEffect(function () {
     messagesEndRef.current?.scrollIntoView({
@@ -34,7 +47,7 @@ function Chat() {
     }
 
     try {
-      const response = await api.get("/conversations?page=1&limit=10");
+      const response = await api.get("/conversations?page=1&limit=50");
       const data = response.data?.data;
 
       const list = Array.isArray(data)
@@ -58,11 +71,82 @@ function Chat() {
     if (user) {
       loadConversations();
     } else {
+      restoredConversationRef.current = false;
       setConversations([]);
       setConversationId(null);
       setMessages([]);
+      setFailedSubmission(null);
     }
   }, [authLoading, user, loadConversations]);
+
+  const userIdentity = user?.id || user?._id || user?.email || null;
+
+  useEffect(function () {
+    restoredConversationRef.current = false;
+  }, [userIdentity]);
+
+  // Restore the active conversation after a page reload.  The conversation
+  // list is paginated, so fetch the stored ID directly instead of assuming
+  // it appears in the first page.
+  useEffect(function () {
+    if (authLoading || !user) return;
+    if (restoredConversationRef.current || conversationId) return;
+
+    restoredConversationRef.current = true;
+    const savedId = readActiveConversation(user);
+    if (!savedId) return;
+
+    let cancelled = false;
+    setIsOpeningConversation(true);
+
+    (async function () {
+      try {
+        const response = await api.get(`/conversations/${savedId}`);
+        const data = response.data?.data;
+        if (!data?.conversation) {
+          throw new Error("تعذر استعادة المحادثة السابقة.");
+        }
+        if (cancelled) return;
+
+        setIsOpeningConversation(false);
+        const storedMessages = mapStoredMessages(data.messages);
+        setConversationId(data.conversation._id);
+        setMessages(storedMessages);
+        setMessage("");
+
+        const savedFailure = readFailedSubmission(user);
+        if (
+          savedFailure &&
+          String(savedFailure.conversationId) ===
+            String(data.conversation._id)
+        ) {
+          setFailedSubmission({
+            ...savedFailure,
+            historyMessages: storedMessages,
+          });
+        }
+      } catch (requestError) {
+        if (cancelled) return;
+        setIsOpeningConversation(false);
+        writeActiveConversation(user, null);
+        setConversationId(null);
+        setMessages([]);
+        if (requestError.response?.status !== 404) {
+          setError(
+            requestError.response?.data?.message ||
+              "تعذر استعادة المحادثة السابقة. يمكنك بدء محادثة جديدة."
+          );
+        }
+      }
+    })();
+
+    return function () {
+      cancelled = true;
+    };
+    // Depend on the stable identity, not the user object: AuthContext
+    // replaces the object with an equal-value object after /usage, which
+    // would cancel the in-flight restore and leave the loader stuck.
+  }, [authLoading, userIdentity, conversationId]);
 
   // فتح محادثة محفوظة
   async function openConversation(item) {
@@ -87,20 +171,25 @@ function Chat() {
         throw new Error("تعذر تحميل المحادثة.");
       }
 
+      const storedMessages = mapStoredMessages(data.messages);
       setConversationId(data.conversation._id);
-
-      setMessages(
-        (data.messages || []).map(function (item, index) {
-          return {
-            id: item._id || `${item.role}-${index}`,
-            text: item.content,
-            sender: item.role,
-            sources: item.sources || [],
-          };
-        })
-      );
-
+      setMessages(storedMessages);
       setMessage("");
+      writeActiveConversation(user, data.conversation._id);
+
+      const savedFailure = readFailedSubmission(user);
+      if (
+        savedFailure &&
+        String(savedFailure.conversationId) ===
+          String(data.conversation._id)
+      ) {
+        setFailedSubmission({
+          ...savedFailure,
+          historyMessages: storedMessages,
+        });
+      } else {
+        setFailedSubmission(null);
+      }
     } catch (requestError) {
       setError(
         requestError.response?.data?.message ||
@@ -223,6 +312,9 @@ function Chat() {
         setConversationId(null);
         setMessages([]);
         setMessage("");
+        setFailedSubmission(null);
+        writeActiveConversation(user, null);
+        writeFailedSubmission(user, null);
       }
 
       await loadConversations();
@@ -239,6 +331,100 @@ function Chat() {
     } finally {
       setDeletingConversationId(null);
     }
+  }
+
+  function errorMessage(requestError) {
+    return (
+      requestError.response?.data?.message ||
+      requestError.response?.data?.error?.message ||
+      requestError.message ||
+      "تعذر الاتصال بالخادم. تأكد من تشغيل الـ Backend وخدمة الذكاء الاصطناعي."
+    );
+  }
+
+  async function requestChat({
+    text,
+    clientMessageId,
+    targetConversationId,
+    historyMessages,
+  }) {
+    const requestBody = {
+      content: text,
+      clientMessageId,
+      chat_history: buildChatHistory(historyMessages, clientMessageId),
+    };
+
+    // Only an authenticated user has persisted conversations.
+    if (user && targetConversationId) {
+      requestBody.conversationId = targetConversationId;
+    }
+
+    const response = await api.post("/messages", requestBody);
+    return response.data?.data || {};
+  }
+
+  function mergeServerResponse(data, clientMessageId, { appendUser = false } = {}) {
+    if (user && data.conversation?._id) {
+      setConversationId(data.conversation._id);
+      writeActiveConversation(user, data.conversation._id);
+    }
+
+    setMessages(function (currentMessages) {
+      return mergeServerMessages(currentMessages, data, clientMessageId, {
+        appendUser,
+      });
+    });
+    writeFailedSubmission(user, null);
+  }
+
+  function handleSendFailure(
+    requestError,
+    { text, clientMessageId, targetConversationId, historyMessages },
+  ) {
+    console.error(
+      "Failed to send message:",
+      requestError.response?.data || requestError.message
+    );
+
+    const recovery = requestError.response?.data?.data || null;
+
+    if (recovery?.conversationId) {
+      setConversationId(recovery.conversationId);
+      writeActiveConversation(user, recovery.conversationId);
+    }
+
+    if (recovery?.userMessageId) {
+      setMessages(function (currentMessages) {
+        return currentMessages.map(function (item) {
+          if (item.clientMessageId !== clientMessageId) return item;
+          return { ...item, id: recovery.userMessageId };
+        });
+      });
+    }
+
+    const retryable = Boolean(recovery?.retryable) || !requestError.response;
+
+    const failed = retryable
+      ? {
+          text,
+          clientMessageId,
+          historyMessages,
+          conversationId:
+            recovery?.conversationId || targetConversationId || null,
+        }
+      : null;
+    setFailedSubmission(failed);
+    writeFailedSubmission(
+      user,
+      failed
+        ? {
+            text: failed.text,
+            clientMessageId: failed.clientMessageId,
+            conversationId: failed.conversationId,
+          }
+        : null,
+    );
+    setError(errorMessage(requestError));
   }
 
   async function handleSubmit(event) {
@@ -260,99 +446,80 @@ function Chat() {
     setError("");
     setIsLoading(true);
     setMessage("");
+    setFailedSubmission(null);
 
-    const previousMessages = messages;
-
-    const userMessage = {
-      id: `local-user-${Date.now()}`,
-      text,
-      sender: "user",
-    };
+    const clientMessageId = makeClientMessageId();
+    const historyMessages = messages;
+    const targetConversationId = conversationId;
 
     setMessages(function (currentMessages) {
-      return [...currentMessages, userMessage];
+      return [
+        ...currentMessages,
+        {
+          id: `local-user-${clientMessageId}`,
+          clientMessageId,
+          text,
+          sender: "user",
+        },
+      ];
     });
 
     try {
-      // تجهيز آخر أربع رسائل سابقة للـ Guest.
-      // السؤال الحالي لا يُضاف إلى chat_history.
-      const chatHistory = previousMessages
-        .filter(function (item) {
-          return (
-            (item.sender === "user" ||
-              item.sender === "assistant") &&
-            typeof item.text === "string" &&
-            item.text.trim().length > 0
-          );
-        })
-        .slice(-4)
-        .map(function (item) {
-          return {
-            role: item.sender,
-            content: item.text.trim(),
-          };
-        });
-
-      const requestBody = {
-        content: text,
-        chat_history: chatHistory,
-      };
-
-      // إضافة معرف المحادثة للمستخدم المسجل فقط
-      if (user && conversationId) {
-        requestBody.conversationId = conversationId;
-      }
-
-      const response = await api.post("/messages", requestBody);
-
-      const result = response.data || {};
-      const data = result.data || {};
-
-      if (user && data.conversation?._id) {
-        setConversationId(data.conversation._id);
-      }
-
-      const answer =
-        data.answer || data.assistantMessage?.content;
-
-      if (typeof answer !== "string" || !answer.trim()) {
-        throw new Error("لم يصل رد صالح من الخادم.");
-      }
-
-      const sources = Array.isArray(data.sources)
-        ? data.sources
-        : Array.isArray(data.assistantMessage?.sources)
-          ? data.assistantMessage.sources
-          : [];
-
-      setMessages(function (currentMessages) {
-        return [
-          ...currentMessages,
-          {
-            id: `local-assistant-${Date.now()}`,
-            text: answer,
-            sender: "assistant",
-            sources,
-          },
-        ];
+      const data = await requestChat({
+        text,
+        clientMessageId,
+        targetConversationId,
+        historyMessages,
       });
 
-      // تحديث سجل المحادثات للمستخدم المسجل فقط
+      mergeServerResponse(data, clientMessageId);
+
       if (user) {
         await loadConversations();
       }
     } catch (requestError) {
-      console.error(
-        "Failed to send message:",
-        requestError.response?.data || requestError.message
-      );
+      handleSendFailure(requestError, {
+        text,
+        clientMessageId,
+        targetConversationId,
+        historyMessages,
+      });
+    } finally {
+      setIsLoading(false);
+      textareaRef.current?.focus();
+    }
+  }
 
-      setError(
-        requestError.response?.data?.message ||
-          requestError.response?.data?.error?.message ||
-          requestError.message ||
-          "تعذر الاتصال بالخادم. تأكد من تشغيل الـ Backend وخدمة الذكاء الاصطناعي."
-      );
+  async function retryFailedSubmission() {
+    if (!failedSubmission || isLoading || isOpeningConversation) return;
+
+    const failed = failedSubmission;
+    setError("");
+    setIsLoading(true);
+
+    try {
+      const data = await requestChat({
+        text: failed.text,
+        clientMessageId: failed.clientMessageId,
+        targetConversationId: failed.conversationId,
+        historyMessages: failed.historyMessages,
+      });
+
+      mergeServerResponse(data, failed.clientMessageId, {
+        appendUser: true,
+      });
+      setFailedSubmission(null);
+
+      if (user) {
+        await loadConversations();
+      }
+    } catch (requestError) {
+      handleSendFailure(requestError, {
+        text: failed.text,
+        clientMessageId: failed.clientMessageId,
+        targetConversationId: failed.conversationId,
+        historyMessages: failed.historyMessages,
+      });
     } finally {
       setIsLoading(false);
       textareaRef.current?.focus();
@@ -381,40 +548,11 @@ function Chat() {
     setMessage("");
     setError("");
     setConversationId(null);
+    setFailedSubmission(null);
+    writeActiveConversation(user, null);
+    writeFailedSubmission(user, null);
 
     textareaRef.current?.focus();
-  }
-
-  function renderSource(source, index) {
-    const sourceText =
-      typeof source === "string"
-        ? source
-        : source?.title || source?.url || "";
-
-    if (!sourceText) return null;
-
-    const sourceUrl =
-      typeof source === "object" ? source.url : sourceText;
-
-    const isUrl =
-      typeof sourceUrl === "string" &&
-      /^https?:\/\//i.test(sourceUrl);
-
-    return (
-      <li key={`${sourceText}-${index}`}>
-        {isUrl ? (
-          <a
-            href={sourceUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            {sourceText}
-          </a>
-        ) : (
-          sourceText
-        )}
-      </li>
-    );
   }
 
   return (
@@ -431,7 +569,7 @@ function Chat() {
             <aside className="chat-sidebar">
               <div className="chat-sidebar-heading">
                 <h3>سجل المحادثات</h3>
-                <span>{conversations.length} / 10</span>
+                <span>{conversations.length} محادثة</span>
               </div>
 
               <button
@@ -624,18 +762,26 @@ function Chat() {
                           </span>
 
                           <p style={{ whiteSpace: "pre-wrap" }}>
-                            {item.text}
-                          </p>
-
-                          {item.sender === "assistant" &&
-                            item.sources?.length > 0 && (
-                              <div className="message-sources">
-                                <strong>المصادر:</strong>
-                                <ul>
-                                  {item.sources.map(renderSource)}
-                                </ul>
-                              </div>
+                            {citationSegments(item.text, item.sources).map(
+                              function (segment, index) {
+                                if (segment.type === "citation") {
+                                  return (
+                                    <span
+                                      className="inline-citation"
+                                      key={`${item.id}-citation-${index}`}
+                                    >
+                                      {segment.text}
+                                    </span>
+                                  );
+                                }
+                                return (
+                                  <span key={`${item.id}-text-${index}`}>
+                                    {segment.text}
+                                  </span>
+                                );
+                              },
                             )}
+                          </p>
                         </div>
                       </div>
                     );
@@ -661,7 +807,7 @@ function Chat() {
               )}
             </div>
 
-            {error && (
+            {(error || failedSubmission) && (
               <div
                 className="chat-notice"
                 role="alert"
@@ -671,7 +817,20 @@ function Chat() {
                 }}
               >
                 <i className="bi bi-exclamation-circle"></i>
-                <span>{error}</span>
+                <span>
+                  {error ||
+                    "تعذر إكمال الرد السابق. يمكنك إعادة المحاولة."}
+                </span>
+                {failedSubmission && (
+                  <button
+                    type="button"
+                    className="chat-retry-button"
+                    onClick={retryFailedSubmission}
+                    disabled={isLoading || isOpeningConversation}
+                  >
+                    إعادة المحاولة
+                  </button>
+                )}
               </div>
             )}
 
@@ -693,6 +852,10 @@ function Chat() {
                 onChange={function (event) {
                   setMessage(event.target.value);
                   if (error) setError("");
+                  if (failedSubmission) {
+                    setFailedSubmission(null);
+                    writeFailedSubmission(user, null);
+                  }
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder="اكتب سؤالك هنا..."

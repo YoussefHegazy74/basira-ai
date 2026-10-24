@@ -39,17 +39,17 @@ const verify = async (text, explanation = "", userId, guestKey) => {
 
 // Guest verification
 const guestVerify = async (text, explanation, guestKey) => {
-  const { ownerKey, limit } = usageService.identify(null, guestKey);
+  const { ownerKey } = usageService.identify(null, guestKey);
 
-  await usageService.consume(ownerKey, limit);
+  await usageService.consume(ownerKey);
 
   return await askModel(text, explanation);
 };
 
 // Authenticated user verification
 const userVerify = async (text, explanation, userId, guestKey) => {
-  const { ownerKey, limit } = usageService.identify(userId, null);
-  await usageService.consume(ownerKey, limit);
+  const { ownerKey } = usageService.identify(userId, null);
+  await usageService.consume(ownerKey);
 
   return await askModel(text, explanation);
 };

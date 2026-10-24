@@ -7,6 +7,7 @@ Handles normalization, tokenization, and stopword removal for Arabic text.
 
 import re
 import string
+import unicodedata
 
 from pyarabic.araby import strip_tashkeel
 
@@ -52,6 +53,82 @@ def normalize(text: str) -> str:
     text = _PUNCTUATION_PATTERN.sub(' ', text)
     text = _EXTRA_SPACES_PATTERN.sub(' ', text).strip()
     return text
+
+
+_VERSE_DIGITS_TRANS = str.maketrans(
+    '٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹',
+    '01234567890123456789',
+)
+_VERSE_INVISIBLE_PATTERN = re.compile(
+    r'[\u061C\u200B-\u200F\u202A-\u202E\u2066-\u2069\uFEFF]'
+)
+_VERSE_QURAN_MARKS_PATTERN = re.compile(r'[\u06D6-\u06ED]')
+_VERSE_ALEF_PATTERN = re.compile(r'[آأإٱٲٳٵ]')
+
+
+def normalize_verse_text(
+    text: str,
+    *,
+    expand_dagger_alef: bool = True,
+    alef_maqsura_mode: str = 'keep',
+) -> str:
+    """Normalize Arabic verse text for exact and partial matching.
+
+    This is intentionally separate from :func:`normalize`: the embedding
+    corpus was built with the older normalization, so changing that function
+    would invalidate the stored vectors.  Canonical Quran text is never
+    modified; callers use this only to compare a user's text with it.
+
+    ``expand_dagger_alef`` controls U+0670 (superscript alef).  Uthmani text
+    uses it where modern spelling may either keep a full alef (e.g. تبارك)
+    or omit it (e.g. الرحمن), so matching builds both variants.
+
+    ``alef_maqsura_mode`` controls alef maqsura followed by a dagger alef
+    (e.g. Uthmani ``أَلْهَىٰكُمُ``).  ``'keep'`` folds it to a plain alef
+    maqsura (``الهيكم``); ``'alef'`` expands it to a full alef
+    (``الهاكم``), which is how modern simplified Arabic usually spells it.
+    """
+    if alef_maqsura_mode not in ('keep', 'alef'):
+        raise ValueError("alef_maqsura_mode must be 'keep' or 'alef'")
+
+    text = unicodedata.normalize('NFC', text or '')
+    text = text.translate(_VERSE_DIGITS_TRANS)
+    text = text.replace('\u0640', '')
+    text = _VERSE_INVISIBLE_PATTERN.sub('', text)
+    text = _VERSE_QURAN_MARKS_PATTERN.sub('', text)
+    # Uthmani orthography writes the long ā in words such as الصلوة and
+    # الربوا as waw + superscript alef (and sometimes a following plain
+    # alef).  The modern spelling uses one plain alef.  Fold the whole
+    # sequence to a single alef so a following plain alef does not create a
+    # spurious doubled alef.  Do not collapse other doubled alefs: sequences
+    # such as "يا" + "إبراهيم" are legitimate word boundaries and collapsing
+    # them would make normalization non-idempotent.
+    text = text.replace('\u0648\u0670\u0627', 'ا')
+    text = text.replace('\u0648\u0670', 'ا')
+    if alef_maqsura_mode == 'alef':
+        for sequence in ('\u0649\u0670', '\u064a\u0670', '\u06cc\u0670'):
+            text = text.replace(sequence, 'ا')
+    else:
+        for sequence in ('\u0649\u0670', '\u064a\u0670', '\u06cc\u0670'):
+            text = text.replace(sequence, sequence[0])
+    text = text.replace('\u0670', 'ا' if expand_dagger_alef else '')
+    text = text.replace('\u0671', 'ا')
+    text = _VERSE_ALEF_PATTERN.sub('ا', text)
+    text = text.replace('\u0621', '')
+    text = (
+        text.replace('ى', 'ي')
+        .replace('ی', 'ي')
+        .replace('ئ', 'ي')
+        .replace('ؤ', 'و')
+        .replace('ة', 'ه')
+        .replace('ہ', 'ه')
+        .replace('ک', 'ك')
+    )
+    text = ''.join(ch for ch in text if not unicodedata.combining(ch))
+    text = ''.join(
+        ch if (ch.isalnum() or ch.isspace()) else ' ' for ch in text
+    )
+    return _EXTRA_SPACES_PATTERN.sub(' ', text).strip()
 
 
 def tokenize(text: str) -> list[str]:

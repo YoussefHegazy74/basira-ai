@@ -23,10 +23,11 @@ const sendMessage = asyncWrapper(async (req, res, next) => {
     conversationId: req.body.conversationId,
     content: req.body.content,
     chatHistory: req.body.chat_history ?? req.body.chatHistory,
+    clientMessageId: req.body.clientMessageId,
     guestKey,
   });
 
-  res.status(req.user ? 201 : 200).json({
+  res.status(req.user ? (result.replayed ? 200 : 201) : 200).json({
     status: HttpStatus.SUCCESS,
     data: result,
   });

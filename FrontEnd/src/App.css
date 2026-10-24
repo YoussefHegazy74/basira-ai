@@ -1060,6 +1060,22 @@
   margin-top: 3px;
 }
 
+.chat-retry-button {
+  margin-inline-start: auto;
+  padding: 5px 10px;
+  color: #fff;
+  background: #b42318;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.chat-retry-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .message-list {
   display: flex;
   flex-direction: column;
@@ -1118,6 +1134,18 @@
   line-height: 1.9;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.inline-citation {
+  display: inline-block;
+  margin-inline-start: 4px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: #e3ece0;
+  color: var(--primary);
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: normal;
 }
 
 .chat-composer {

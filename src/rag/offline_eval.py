@@ -73,6 +73,7 @@ sys.path.insert(0, ".")
 
 import src.rag.pipeline as P  # noqa: E402
 from src.rag.eval_set import EVAL_QUESTIONS, GROUNDING_CASES  # noqa: E402
+from src.rag.broad_eval_set import BROAD_EVAL_QUESTIONS  # noqa: E402
 
 CHUNKS_PATH = "data/processed/chunks.pkl"
 INDEX_PATH = "data/processed/faiss.index"
@@ -255,9 +256,10 @@ def run_retrieval_eval(
     sem_mode: str,
     sem_fixture: dict[str, list[dict]],
     query_vectors: dict[str, dict] | None = None,
+    questions: list[dict] | None = None,
 ) -> list[dict]:
     rows: list[dict] = []
-    for q in EVAL_QUESTIONS:
+    for q in (questions if questions is not None else EVAL_QUESTIONS):
         evidence = set(q["evidence_ids"])
         tokens = _query_tokens(q["question"])
 
@@ -472,7 +474,17 @@ def main() -> None:
     ap.add_argument("--sem-queries", dest="sem_queries", default=None,
                     help="operator-supplied (claimed genuine) cached query "
                          "embeddings JSON; format documented in module docstring")
+    ap.add_argument("--set", dest="question_set", choices=("baseline", "broad"),
+                    default="baseline",
+                    help="question set: baseline (22 annotated questions) or "
+                         "broad (Quran/Tafsir/Hadith/Fiqh/Seerah/variants/"
+                         "abstention)")
     args = ap.parse_args()
+
+    questions = (
+        BROAD_EVAL_QUESTIONS if args.question_set == "broad" else EVAL_QUESTIONS
+    )
+    print(f"[eval] question set: {args.question_set} ({len(questions)} questions)")
 
     chosen = [name for name, on in (
         ("fixture", bool(args.sem_fixture)),
@@ -529,7 +541,8 @@ def main() -> None:
     print(header)
     print("-" * len(header))
     retrieval_rows = run_retrieval_eval(
-        chunks, chunk_by_id, index, sem_mode, sem_fixture, query_vectors
+        chunks, chunk_by_id, index, sem_mode, sem_fixture, query_vectors,
+        questions,
     )
     for r in retrieval_rows:
         cov = (
@@ -602,6 +615,8 @@ def main() -> None:
 
     if args.json_path:
         out = {
+            "question_set": args.question_set,
+            "question_count": len(questions),
             "sem_mode": sem_mode,
             "proxy_disclosure": (
                 "query encoding mocked (no API); sem-vectors uses the real stored "

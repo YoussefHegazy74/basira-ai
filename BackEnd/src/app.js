@@ -1,5 +1,27 @@
 const express = require("express");
+const mongoose = require("mongoose");
 const app = express();
+
+// Authenticated API responses must never be served from a browser cache.
+// Conditional GETs were returning 304 with no JSON body when a conversation
+// was reopened, which made the Chat History view fail to hydrate.
+app.set("etag", false);
+app.use((req, res, next) => {
+  res.set("Cache-Control", "no-store");
+  next();
+});
+
+// Liveness/readiness are intentionally mounted before the API rate limiter so
+// container and reverse-proxy probes do not consume user request quota.
+app.get("/health", (req, res) => {
+  res.status(200).json({ status: "ok" });
+});
+app.get("/ready", (req, res) => {
+  const ready = mongoose.connection.readyState === 1;
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "not-ready",
+  });
+});
 
 // ===== Third-Party Middleware =====
 const cors = require("cors");
@@ -29,12 +51,33 @@ const limiter = rateLimit({
 });
 
 // ===== Global Middleware =====
+const allowedOrigins = new Set(
+  [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    process.env.FRONTEND_URL,
+    ...(process.env.CORS_ORIGINS || "").split(","),
+  ]
+    .map((origin) => (origin || "").trim())
+    .filter(Boolean),
+);
+
 app.use(cookieParser());
 app.use(helmet());
 app.use(limiter);
 app.use(
   cors({
-    origin: true,
+    // Reflecting an arbitrary Origin with credentials enabled would let any
+    // site call authenticated endpoints.  Use an explicit allowlist; deploy
+    // targets add their origin through FRONTEND_URL or CORS_ORIGINS.
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.has(origin)) {
+        return callback(null, true);
+      }
+      return callback(null, false);
+    },
     credentials: true,
   }),
 );
@@ -65,6 +108,7 @@ app.use("/usage", usageRoutes);
 app.use("/tafsir", tafsirRoutes);
 app.use("/verify", verifyRoutes);
 app.use("/users", userRoutes);
+
 // ===== 404 Handler =====
 app.use((req, res, next) => {
   return res.status(404).json({
@@ -103,11 +147,15 @@ app.use((err, req, res, next) => {
   }
 
   // Default error
-  res.status(err.statusCode || 500).json({
+  const payload = {
     status: err.statustext || HttpStatusText.ERROR,
     message: err.message || "Something Went Wrong",
     errors: err.errors || [],
-  });
+  };
+  // Structured recovery metadata (conversation/message IDs, retryable flag)
+  // must reach the browser so a failed generation can be retried idempotently.
+  if (err.data && typeof err.data === "object") payload.data = err.data;
+  res.status(err.statusCode || 500).json(payload);
 });
 
 module.exports = app;

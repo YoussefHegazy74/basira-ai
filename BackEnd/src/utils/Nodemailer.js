@@ -1,16 +1,28 @@
 const nodemailer = require("nodemailer");
-async function sendEmail(options) {
-  const transporter = nodemailer.createTransport({
-    service: process.env.SMTP_SERVICE || process.env.Service,
-    auth: {
-      user: process.env.SMTP_USER || process.env.USER,
-      pass: process.env.SMTP_PASSWORD || process.env.APP_PASSWORD,
-    },
+
+function createTransporter() {
+  const service = process.env.SMTP_SERVICE;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD;
+
+  if (!service || !user || !pass) {
+    throw new Error(
+      "SMTP is not configured: set SMTP_SERVICE, SMTP_USER and SMTP_PASSWORD",
+    );
+  }
+
+  return nodemailer.createTransport({
+    service,
+    auth: { user, pass },
     secure: true,
   });
+}
 
-  const info = await transporter.sendMail({
-    from: "Basira AI",
+async function sendEmail(options) {
+  const transporter = createTransporter();
+
+  return await transporter.sendMail({
+    from: process.env.SMTP_FROM || process.env.SMTP_USER,
     to: options.to,
     subject: options.subject,
     text: options.text,

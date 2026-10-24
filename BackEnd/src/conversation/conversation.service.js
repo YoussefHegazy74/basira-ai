@@ -43,14 +43,14 @@ const getUserConversations = async (userId, page, limit) => {
 const getConversationById = async (conversationId, userId) => {
   const conversation = await getOwnedOrThrow(conversationId, userId);
   const messages = await Message.find({ conversationId: conversation._id })
-    .sort({ createdAt: 1 })
+    .sort({ createdAt: 1, _id: 1 })
     .lean();
   return { conversation, messages };
 };
 
 /// rename conversation
 const renameConversation = async ({ conversationId, userId, newTitle }) => {
-  title = typeof newTitle === "string" ? newTitle.trim() : "";
+  const title = typeof newTitle === "string" ? newTitle.trim() : "";
   if (!title) {
     throw new AppError(400, "Title is required", HttpStatus.BAD_REQUEST);
   }
@@ -80,6 +80,15 @@ const incrementMessageCount = async (conversationId, by = 1) => {
   );
 };
 
+/// remove a newly-created conversation that never received a message
+const deleteIfEmpty = async (conversationId, userId) => {
+  await Conversation.deleteOne({
+    _id: conversationId,
+    userId,
+    messageCount: 0,
+  });
+};
+
 module.exports = {
   getOwnedOrThrow,
   createConversation,
@@ -88,4 +97,5 @@ module.exports = {
   renameConversation,
   deleteConversation,
   incrementMessageCount,
+  deleteIfEmpty,
 };

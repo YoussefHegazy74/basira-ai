@@ -1033,14 +1033,20 @@ def test_p5v5_grounding_policy() -> None:
 def test_grounding_curated_alias() -> None:
     print("\n[15] Grounding curated alias (نزول -> نزلت)")
 
-    # The single audited pair: an exact folded table, no stem/prefix/suffix
-    # expansion, and no reverse direction (Phase E.4; evidence in the
-    # Phase E.1 false-rejection analysis and Phase E.3 audit reports).
-    check("curated alias table holds exactly the audited pair",
-          P._GROUNDING_CURATED_ALIASES == {"نزول": ("نزلت",)})
-    check("alias hits select only the exact folded target",
+    # Audited pairs only: exact folded tables, no stem/prefix/suffix
+    # expansion, and no reverse direction.  نزول is the Phase E.4 pair, with
+    # its audited إعلال surfaces نزلت/أنزل/نزل; وجود/يجد covers the fiqh
+    # paraphrase "عدم وجود الماء" for "لم يجد الماء"; قلق/كرب covers the
+    # revelation hadith's "كُرِبَ" paraphrase.
+    check("curated alias table holds exactly the audited pairs",
+          P._GROUNDING_CURATED_ALIASES == {
+              "نزول": ("نزلت", "انزل", "نزل"),
+              "وجود": ("يجد", "تجدوا", "وجد"),
+              "قلق": ("كرب",),
+          })
+    check("alias hits select only the exact folded targets",
           P._curated_alias_surfaces("نزول", {"نزلت", "نزل", "الرحمة"})
-          == {"نزلت"})
+          == {"نزلت", "نزل"})
     check("alias is not reverse-matching",
           P._curated_alias_surfaces("نزلت", {"نزول"}) == set())
     check("other hollow pairs stay unaliased",
@@ -1063,9 +1069,10 @@ def test_grounding_curated_alias() -> None:
           "digits=ok months=ok neg=ok quote=ok entity=ok" in log_pos
           and "rare=" not in log_pos)
 
-    # Exact-match boundaries: only the exact source surface نزلت activates;
-    # bare نزل, the x+ة form نزلة, the reverse direction and any other
-    # hollow-looking pair must all stay blocked.
+    # Exact-match boundaries: the audited surface variants نزلت/أنزل/نزل
+    # activate; the x+ة form نزلة, the bare-stem ينزل (separate falsifier
+    # below), the reverse direction and other hollow-looking pairs stay
+    # blocked.
     src_bare = _chunk("p5_alias_bare", "hadith",
                       "لما نزل آية الرحمة اجتنب الناس مال اليتيم")
     buf = io.StringIO()
@@ -1073,8 +1080,8 @@ def test_grounding_curated_alias() -> None:
         out = P._ground_answer(claim_pos, [src_bare], [src_bare])
     log_bare = next((ln for ln in buf.getvalue().splitlines()
                      if ln.startswith("[ground]")), "")
-    check("bare نزل source does not activate the alias",
-          out.strip() == REFUSAL and "rare=نزول" in log_bare)
+    check("bare نزل source activates the audited alias",
+          out.strip() != REFUSAL and "rare=نزول" not in log_bare)
     src_ta = _chunk("p5_alias_ta", "hadith",
                     "لما نزلة آية الرحمة اجتنب الناس مال اليتيم")
     out = P._ground_answer(claim_pos, [src_ta], [src_ta])
@@ -1170,7 +1177,7 @@ def test_refusal_prefix_grounding() -> None:
     corpus = [chunk]
 
     orig_retrieve = P.retrieve
-    P.retrieve = lambda query, index, chunks, client, top_k=5: [
+    P.retrieve = lambda query, index, chunks, client, top_k=5, **kwargs: [
         dict(retrieved[0])]
     try:
         hallucination = "الصلاة لا تجب على المسلم في السفر مطلقا."
@@ -1371,7 +1378,7 @@ def test_bm25_grounding_reuse() -> None:
     P._bm25_cache.pop(key, None)
 
     orig_retrieve = P.retrieve
-    P.retrieve = lambda query, index, chunks, client, top_k=5: [
+    P.retrieve = lambda query, index, chunks, client, top_k=5, **kwargs: [
         dict(retrieved[0])]
     try:
         chat = _FakeChat(

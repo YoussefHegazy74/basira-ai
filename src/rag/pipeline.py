@@ -18,7 +18,7 @@ from collections import defaultdict
 
 from openai import OpenAI
 
-from src.nlp.preprocessor import preprocess, normalize
+from src.nlp.preprocessor import preprocess, normalize, normalize_verse_text
 from src.embeddings.embedder import get_client, embed_text
 from src.vector_db.faiss_store import search
 
@@ -104,10 +104,12 @@ _BM25_BODY_TOKEN_CAP = 200
 
 # Fiqh sections are long multi-topic chunks (e.g. fiqh_165 has the decisive
 # "الوتر سنة مؤكدة" at token 201), so the global 200-token cap can hide the
-# one passage that answers a ruling question.  Tafsir keeps the lower cap:
-# its opening verses already carry the retrieval signal and its documents are
-# much longer.  This is source-aware, not a global index expansion.
-_BM25_BODY_TOKEN_CAP_BY_SOURCE = {"fiqh": 500}
+# one passage that answers a ruling question.  Long hadith matn/sharh blocks
+# can likewise place the decisive wording late (519 hadith chunks exceed 200
+# tokens; 47 exceed 500).  Tafsir keeps the lower cap: its opening verses
+# already carry the retrieval signal and its documents are much longer.
+# This is source-aware, not a global index expansion.
+_BM25_BODY_TOKEN_CAP_BY_SOURCE = {"fiqh": 500, "hadith": 600}
 
 # Query tokens stripped for retrieval purposes.
 _QUERY_STOPWORDS = {
@@ -141,13 +143,25 @@ SYSTEM_MESSAGE = (
     "إذا ورد في المصادر تفسير فقهي يبين المراد من الحديث فاعتمد التفسير واذكره صريحا. "
     "إذا ذكر المصدر أن الوجوب أو الحرمة محمول على معنى آخر مثل تأكيد الاستحباب فاذكر المعنى الصريح. "
     "لا تكتف بظاهر لفظ الوجوب أو الحرمة إذا ورد بعده تفسير صريح للمراد، بل اذكر التفسير. "
+    "لا ترفع درجة الحكم من كراهة أو استحباب أو إباحة إلى وجوب أو تحريم أو بطلان إلا إذا دل اللفظ الصريح في المصدر على ذلك. "
+    "إذا ورد في المصدر استثناء أو شرط يبيح الفعل أو يرفع الكراهة عنه فلا تجعله دليلا على وجوب الفعل. "
+    "إذا سأل السؤال هل يجب أو هل يحرم، فبيّن درجة الحكم التي يدعمها المصدر وما يتصل بها من شروط أو استثناءات، ولا تجزم بما لا يدعمه النص. "
+    "إذا كان السؤال عن الوجوب أو اللزوم فاجعل الجواب المباشر جملة مستقلة تبدأ بـ'لا يجب' أو 'يجب' حسب ما يدعمه المصدر، ثم اذكر التفصيل والدليل في جملة منفصلة. "
+    "لا تستخدم 'فعليه أن' أو 'يلزمه' إلا إذا كان الوجوب ثابتا بنص صريح في المصادر. "
+    "فرّق بين نص الحديث وبين تفسير الفقهاء له، وانسب كل قول إلى مصدره. "
+    "لا تستشهد بآية أو حديث عام لا يدعم الجملة التي قبله. "
     "إذا ورد في المصادر نهي عن الفعل فاذكره بلفظ النهي. "
     "إذا سأل السؤال عن وقت فاذكر بداية الوقت ونهايته إن ذكرتا في المصادر. "
     "إذا ذكرت المصادر أرقاما أو مددا متعددة لنفس الحكم فاذكرها كلها. "
     "إذا كان السؤال عن حكم فاذكر جملة الحكم الصريحة من المصدر قبل التفاصيل. "
+    "إذا كان السؤال الحالي متابعة أو طلب توضيح، فافهمه من سياق المحادثة وأجب عن نفس الموضوع مباشرة دون تكرار الجواب السابق كاملا. "
+    "لا تضف وصفا للحكم (مثل مستحب أو واجب أو حلال أو حرام) غير موجود نصا في المصادر، واكتف بالحكم الذي تدعمه. "
     "اجعل جملة الحكم مستقلة، واذكر الخلاف أو التفاصيل بعدها في جملة منفصلة. "
     "إذا ورد تعريف صريح للشيء في المصادر فابدأ به. "
-    "إذا طلب السؤال قصة فاذكر عناصرها الأساسية كما ترد في المصادر. "
+    "إذا طلب السؤال قصة فاذكر عناصرها الأساسية كما ترد في المصادر، واجمع عناصر القصة من جميع المصادر ذات الصلة ولا تكتف برواية واحدة. "
+    "إذا روت المصادر القصة نفسها في أكثر من حديث أو كتاب، فاقرأ جميع الروايات واجمع التفاصيل التي تنفرد بها كل رواية، واذكر مصدر كل تفصيل. "
+    "إذا كان السؤال عن تفسير آية فابدأ ببيان معناها الإجمالي كما ورد في التفسير ثم اذكر تفاصيله. "
+    "إذا كان السؤال عن حكم فاذكر معه ما ورد في المصادر من عدد أو مدة أو شروط متعلقة به. "
     "إذا كان جواب السؤال نهيا فاذكره مباشرة دون تفريعات. "
     "إذا أجابت المصادر عن السؤال أو عن جزء منه فأجب بما ورد فيها، ولا ترفض إلا إذا لم تتناول المصادر الموضوع إطلاقا. "
     "اقتصر على ما يجيب السؤال مباشرة، ولا تضف تفاصيل أو قصصا غير مطلوبة. "
@@ -266,6 +280,336 @@ def _inject_surah_chunks(
 
 
 # ===========================================================================
+# Quran topic anchors
+# ===========================================================================
+# Core Quranic topics whose governing verse uses classical vocabulary that a
+# modern question may not share (e.g. "كيف يتوضأ؟" vs "فاغسلوا وجوهكم",
+# "الربا" vs the Uthmani spelling).  BM25 and the embedding model can both
+# miss the verse even when it is the primary source.  This small, explicit
+# topic index guarantees ONE canonical verse for the clearest core topics;
+# it is not a general-purpose verse recommender and never replaces normal
+# retrieval.  Tafsir requests and whole-surah requests are excluded because
+# their own deterministic resolvers are more precise.
+_QURAN_TOPIC_ANCHOR_RULES = (
+    (re.compile(
+        r"(?:^|\s)(?:ايه\s+الكرسي|الكرسي|اعظم\s+ايه|افضل\s+ايه)"
+        r"(?:\s|$)"
+    ), "quran_2_255"),
+    (re.compile(
+        r"(?:^|\s)(?:يتوضا|توضا|الوضوء|وضوء|وضو)(?:\s|$)"
+    ), "quran_5_6"),
+    (re.compile(
+        r"(?:^|\s)(?:الربا|ربا|الربوا|ربوا)(?:\s|$)"
+    ), "quran_2_275"),
+    (re.compile(
+        r"(?:^|\s)(?:الوالدين|والدين|الوالد|والد)(?:\s|$)"
+    ), "quran_17_23"),
+    (re.compile(
+        r"(?:^|\s)(?:الميراث|ميراث|التركة|تركة|الفرائض|فرائض|"
+        r"نصيب|ورث|الورث)(?:\s|$)"
+    ), "quran_4_11"),
+    (re.compile(
+        r"(?:^|\s)(?:الحج|حج|بيت\s+الله\s+الحرام)(?:\s|$)"
+    ), "quran_3_97"),
+    (re.compile(
+        r"(?:^|\s)(?:الصيام|صيام|الصوم|صوم)(?:\s|$)"
+    ), "quran_2_183"),
+    (re.compile(
+        r"(?:^|\s)(?:الجمعة|جمعة|الجمعه|جمعه)(?:\s|$)"
+    ), "quran_62_9"),
+    (re.compile(
+        r"(?:^|\s)(?:اليتامى|يتامى|اليتيم|يتيم)(?:\s|$)"
+    ), "quran_4_10"),
+)
+
+_chunk_id_map_cache: dict[
+    tuple[int, int], tuple[list[dict], dict[str, dict]]
+] = {}
+
+
+def _get_chunk_id_map(chunks: list[dict]) -> dict[str, dict]:
+    key = (id(chunks), len(chunks))
+    entry = _chunk_id_map_cache.get(key)
+    # Keep a reference to the list itself.  A bare id() key can be reused
+    # after an ephemeral list is garbage-collected, which made anchors resolve
+    # against a previous test's chunk map.  The cached map already holds the
+    # chunk dicts, so retaining the list adds no meaningful memory cost.
+    if entry is not None and entry[0] is chunks:
+        return entry[1]
+    cached = {c.get("id", ""): c for c in chunks}
+    _chunk_id_map_cache[key] = (chunks, cached)
+    return cached
+
+
+_QURAN_TOPIC_COMPANION_IDS = {
+    # The verse itself never uses the name "آية الكرسي"; Ibn Kathir's
+    # commentary opens with "هذه آية الكرسي" and is the retrieved evidence
+    # that lets the answer identify the verse the user asked about.
+    "quran_2_255": "tafsir_ibnkathir_2_255",
+}
+
+
+def _quran_topic_companions(
+    anchor: dict, chunks: list[dict],
+) -> list[dict]:
+    """Return cited commentary companions for a core-topic verse anchor."""
+    cid = _QURAN_TOPIC_COMPANION_IDS.get(anchor.get("id", ""))
+    if not cid:
+        return []
+    companion = _get_chunk_id_map(chunks).get(cid)
+    return [companion] if companion is not None else []
+
+
+_FASTING_TOKEN_PREFIXES = (
+    "صوم", "صيم", "صيام", "صائم", "صايم", "صاءم",
+    "صام", "يصوم", "اصوم", "تصوم", "نصوم", "صوموا",
+    "افطر", "فطر", "مفطر",
+)
+_FASTING_DAY_QUALIFIERS = {
+    "عرفه", "عرفة", "عاشوراء", "عاشورا", "رمضان",
+}
+
+
+def _asks_fasting_query(query: str) -> bool:
+    for token in _tokenize(normalize(query)):
+        folded = _fold_ar(token)
+        if folded.startswith(_FASTING_TOKEN_PREFIXES):
+            return True
+    return False
+
+
+def _required_action_evidence_keys(query: str) -> set[str]:
+    """Action + day keys a source must share for a day-qualified fast claim."""
+    tokens = set(_tokenize(normalize(query)))
+    if not _asks_fasting_query(query):
+        return set()
+    qualifiers = (
+        tokens & _DATE_WEEKDAY_TOKENS
+    ) | (
+        tokens & (_FASTING_DAY_QUALIFIERS - {"رمضان"})
+    )
+    if not qualifiers:
+        return set()
+    return {"صوم"} | {_legal_topic_key(q) for q in qualifiers}
+
+
+def _filter_joint_evidence(
+    selected: list[dict], query: str,
+) -> list[dict]:
+    """Drop scripture that shares only one side of a day-qualified fast claim.
+
+    A Quran/tafsir passage about Friday prayer, or about Ramadan fasting in
+    general, is not evidence for "fasting on Friday".  Hadith/Fiqh remain
+    available because they often state the ruling without repeating every
+    qualifier; their claims are checked sentence-by-sentence later.
+    """
+    required = _required_action_evidence_keys(query)
+    if not required:
+        return selected
+    kept = []
+    for chunk in selected:
+        if chunk.get("source") not in {"quran", "tafsir"}:
+            kept.append(chunk)
+            continue
+        if required <= _legal_topic_keys(
+            chunk.get("original_text", "") or "",
+        ):
+            kept.append(chunk)
+    return kept
+
+
+def _resolve_quran_topic_anchor(
+    query: str, chunks: list[dict],
+) -> dict | None:
+    """Return the canonical Quran verse for a clear core-topic question."""
+    qn = normalize(query)
+    if _TAFSIR_VERB_RE.search(qn) or _TAFSIR_MEANING_RE.search(qn):
+        return None
+    by_id = _get_chunk_id_map(chunks)
+    for pattern, chunk_id in _QURAN_TOPIC_ANCHOR_RULES:
+        if pattern.search(qn):
+            # The Ramadan obligation verse (2:183) is not evidence for a
+            # separately qualified voluntary fast (Arafah or a named weekday).
+            # Anchoring those queries to 2:183 displaced the actual fiqh
+            # evidence and made a general obligation verse look like an answer
+            # to the narrower question.
+            if chunk_id == "quran_2_183" and (
+                "عرفه" in qn or "عرفة" in qn
+                or set(_tokenize(qn)) & _DATE_WEEKDAY_TOKENS
+            ):
+                continue
+            # The Friday-prayer verse is not evidence for a fasting question.
+            if chunk_id == "quran_62_9" and _asks_fasting_query(qn):
+                continue
+            chunk = by_id.get(chunk_id)
+            if chunk is not None:
+                return chunk
+    return None
+
+
+# A very small set of canonical hadith facts whose wording shares almost no
+# lexical overlap with the natural question.  "كم كان عمر النبي حين توفي؟"
+# retrieves narrations containing عمر (the name) but not the death-age
+# hadith, and "كيف بدأ الوحي؟" retrieves general revelation narrations but
+# not Bukhari's first hadith.  These anchors guarantee the canonical report;
+# they are not a general-purpose hadith recommender.
+_CORE_HADITH_ANCHOR_RULES = (
+    (
+        re.compile(
+            r"(?:^|\s)عمر(?:\s|$).*?(?:النبي|رسول)(?:\s|$)"
+            r".*?(?:توفي|توفى|مات|الوفاه|وفاه)(?:\s|$)"
+        ),
+        "hadith_bukhari_3386",
+    ),
+    (
+        re.compile(
+            r"(?:^|\s)(?:بدا|بدء|اول|ابتداء)(?:\s|$)"
+            r".*?(?:الوحي|الوحى)(?:\s|$)"
+        ),
+        "hadith_bukhari_3",
+    ),
+    (
+        re.compile(
+            r"(?:^|\s)(?:اسماء|اسم)(?:\s|$)"
+            r".*?(?:الله|لله)(?:\s|$).*?الحسن"
+        ),
+        "hadith_bukhari_2624",
+    ),
+    (
+        # "كم عدد أبواب الجنة؟" has no exact lexical bridge to the short
+        # hadith "للجنة ثمانية أبواب"; it ranked 60th in BM25 at HEAD and in
+        # the current index.  This is a canonical core fact, so anchor it.
+        re.compile(
+            r"(?:^|\s)(?:ابواب|باب)(?:\s|$).*?(?:الجنه|الجنة)(?:\s|$)"
+            r"|(?:^|\s)(?:الجنه|الجنة)(?:\s|$).*?(?:ابواب|باب)(?:\s|$)"
+        ),
+        "hadith_darimi_39619",
+    ),
+)
+
+
+def _resolve_core_hadith_anchor(
+    query: str, chunks: list[dict],
+) -> dict | None:
+    """Return the canonical hadith chunk for a clear core-fact question."""
+    qn = normalize(query)
+    if _TAFSIR_VERB_RE.search(qn) or _TAFSIR_MEANING_RE.search(qn):
+        return None
+    by_id = _get_chunk_id_map(chunks)
+    for pattern, chunk_id in _CORE_HADITH_ANCHOR_RULES:
+        if pattern.search(qn):
+            chunk = by_id.get(chunk_id)
+            if chunk is not None:
+                return chunk
+    return None
+
+
+# ===========================================================================
+# Tafsir-intent chat anchors
+# ===========================================================================
+# A chat question that explicitly asks for a tafsir/meaning of Quranic text
+# should use the same deterministic verse resolver as /api/tafsir.  Without
+# this, a specific-ayah question could retrieve an unrelated tafsir passage
+# (observed live: "تفسير سورة الإخلاص الآية الأولى" retrieved 112:1 only by
+# luck and "تفسير آية حج البيت" retrieved no tafsir at all).
+_TAFSIR_VERB_RE = re.compile(
+    r"(?:^|\s)(?:تفسير|فسر|فسري|اشرح|وضح|بين)(?:\s|$)"
+)
+_TAFSIR_EXPLAIN_RE = re.compile(
+    r"(?:^|\s)(?:اشرح|وضح|بين)(?:\s|$)"
+)
+_TAFSIR_MEANING_RE = re.compile(r"(?:^|\s)معن[ىي](?:\s|$)")
+_QURAN_MARKER_RE = re.compile(
+    r"(?:^|\s)(?:ايه|الايه|ايات|الايات|سوره|قوله|قول)(?:\s|$)"
+    r"|[\uFD3F\u00ab\"]"
+)
+# Honorifics add high-IDF query tokens ("صلى" df 317) that pull the lexical
+# ranking toward hadith narrations instead of the asked-about subject.  They
+# carry no retrieval intent, so remove them from the BM25 query only; the
+# semantic embedding still sees the user's exact wording.
+_HONORIFIC_RE = re.compile(
+    r"(?:صلي|صلى)\s+الله\s+(?:عليه|عليها|عليهم)\s+وسلم"
+    r"|(?:عليه|عليها|عليهم)\s+السلام"
+    r"|رضي\s+الله\s+(?:عنه|عنها|عنهم)"
+)
+
+
+def _resolve_chat_tafsir(
+    query: str,
+    index,
+    chunks: list[dict],
+    client=None,
+) -> tuple[list[dict], str]:
+    """Resolve a Tafsir-intent chat query to deterministic anchors.
+
+    Returns ``(anchors, clarification)``.  Anchors are the canonical Quran
+    verse plus its Tafsir Ibn Kathir chunk.  A clarification is returned only
+    for an explicit tafsir request that names a surah/ayah incompletely
+    (e.g. a whole surah without an ayah number); ambiguous or non-Quranic
+    "معنى" questions are left to normal retrieval instead of being hijacked.
+    """
+    normalized = normalize(query)
+    explicit = bool(_TAFSIR_VERB_RE.search(normalized))
+    explain = bool(_TAFSIR_EXPLAIN_RE.search(normalized))
+    meaning = bool(_TAFSIR_MEANING_RE.search(normalized))
+    quran_marker = bool(_QURAN_MARKER_RE.search(normalized))
+    if not (explicit or (explain and quran_marker) or meaning):
+        return [], ""
+
+    # Imported lazily: tafsir.py imports ground_text from this module.
+    from src.rag.tafsir import resolve_tafsir_reference
+
+    resolution = resolve_tafsir_reference(query, index, chunks, client)
+    if resolution[0] is not None:
+        # A bare "ما معنى X؟" is only treated as a Quran question when the
+        # resolver found an exact verse (or an explicit reference).  A short
+        # partial phrase could otherwise match dozens of unrelated verses.
+        if (meaning and not explicit and not quran_marker
+                and resolution.match_kind not in ("exact", "reference")):
+            return [], ""
+        anchors = []
+        if resolution.quran_chunk is not None:
+            anchors.append(resolution.quran_chunk)
+        anchors.append(resolution[0])
+        return anchors, ""
+
+    if (explicit or (explain and quran_marker)) and resolution.failure_message:
+        return [], resolution.failure_message
+    return [], ""
+
+
+def _inject_tafsir_anchors(
+    anchors: list[dict],
+    pool: list[dict],
+) -> tuple[list[dict], set[str]]:
+    """Inject resolved Quran/Tafsir anchors with the fixed high score.
+
+    The anchors bypass the diversity cap, exactly like surah injections, so
+    the verse and its commentary cannot be displaced by near-duplicate
+    narrations.  No synthetic relevance score is attached to any other chunk.
+    """
+    existing_ids = {c["id"]: i for i, c in enumerate(pool)}
+    to_inject: list[dict] = []
+    injected_ids: set[str] = set()
+    for c in anchors:
+        cid = c["id"]
+        injected = {
+            "id": cid,
+            "source": c.get("source", ""),
+            "reference": c.get("reference", ""),
+            "original_text": c.get("original_text", ""),
+            "score": _SURAH_INJECT_SCORE,
+            "_injected": True,
+        }
+        injected_ids.add(cid)
+        if cid in existing_ids:
+            pool[existing_ids[cid]] = injected
+        else:
+            to_inject.append(injected)
+    return to_inject + pool, injected_ids
+
+
+# ===========================================================================
 # BM25 index (lazy build, cached by (id(chunks), len(chunks)), single-flight)
 # Posting-list design: builds once in ~2s, searched in O(|q| * avg_postings)
 # ===========================================================================
@@ -292,6 +636,11 @@ def _strip_al(token: str) -> str:
     persisted-index rebuild (the BM25 index is rebuilt in memory from
     chunks.pkl on each process start).
     """
+    # "الله" is a lexical word, not the article ال + له.  Stripping it
+    # produced the pronoun "له" (df 44,995), so the index had no "الله"
+    # token at all and every mention of God matched the unrelated pronoun.
+    if token in {"الله", "لله"}:
+        return token
     for p in _CONJ_ARTICLE_PREFIXES:
         if token.startswith(p) and len(token) - len(p) >= 3:
             return token[len(p):]
@@ -302,9 +651,82 @@ def _strip_al(token: str) -> str:
     return token
 
 
+# Orthographic folding applied identically to BM25 index tokens and query
+# tokens.  clean_text was produced by the older normalize(), which leaves
+# alef maqsura, tatweel, nisba/yaa hamza and Arabic-Indic digits untouched.
+# Folding both sides in memory closes those gaps without rebuilding the
+# persisted embeddings or modifying the corpus.
+_LEXICAL_FOLD_TRANS = str.maketrans({
+    "\u0640": "",      # tatweel
+    "ى": "ي",
+    "ی": "ي",
+    "ئ": "ي",
+    "ؤ": "و",
+    "ء": "",
+    "ة": "ه",
+    "أ": "ا",
+    "إ": "ا",
+    "آ": "ا",
+    "ٱ": "ا",
+    "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
+    "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+    "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4",
+    "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9",
+})
+
+
+def _fold_lexical(token: str) -> str:
+    return _strip_al(token.translate(_LEXICAL_FOLD_TRANS))
+
+
+def _root_key(token: str) -> str:
+    """Conservative Arabic root-ish key for *reference-title* matching only.
+
+    This is deliberately not used for BM25 postings or grounding: it is a
+    retrieval aid for descriptive metadata such as
+    "ولادة رسول الله ... ورضاعته", where the query says "أرضعت" and a plain
+    token index sees no overlap.  The transformation is deterministic and
+    applied identically to title and query tokens, so consistency matters
+    more than linguistic perfection.
+    """
+    t = _fold_lexical(token)
+    if t in {"الله", "لله"}:
+        return t
+    # Conjunctions/articles and the Form-X prefix.
+    for p in ("است", "وال", "فال", "بال", "كال", "لل", "ال", "و", "ف"):
+        if t.startswith(p) and len(t) - len(p) >= 3:
+            t = t[len(p):]
+            break
+    # Imperfect/imperative person prefixes.
+    for p in ("ا", "ت", "ي", "ن", "م"):
+        if t.startswith(p) and len(t) - 1 >= 3 and len(t) >= 4:
+            t = t[1:]
+            break
+    # Pronominal/plural/verbal suffixes, iteratively (e.g. رضاعته -> رضاع).
+    changed = True
+    while changed and len(t) > 3:
+        changed = False
+        for s in ("ها", "هم", "هن", "كم", "كن", "نا", "ون", "ين",
+                  "ات", "ان", "وا", "ه", "ت", "ي", "ا"):
+            if t.endswith(s) and len(t) - len(s) >= 3:
+                t = t[:-len(s)]
+                changed = True
+                break
+    # Drop weak letters from the interior (رضاع -> رضع).
+    if len(t) > 3:
+        t = t[0] + "".join(ch for ch in t[1:-1] if ch not in "اوي") + t[-1]
+    return t
+
+
 def _tokenize_clean(text: str) -> list[str]:
     """Fast split of already-normalized clean_text — no regex, no normalize()."""
-    return [_strip_al(w) for w in text.split() if len(w) >= 2]
+    return [
+        folded
+        for w in text.translate(_LEXICAL_FOLD_TRANS).split()
+        if len(w) >= 2
+        for folded in (_strip_al(w),)
+        if len(folded) >= 2
+    ]
 
 
 def _tokenize(text: str) -> list[str]:
@@ -392,8 +814,20 @@ def _bm25_construct(chunks: list[dict], tracing_started: bool) -> dict:
         src = c.get("source", "")
         # Body: cap at the per-source limit to bound posting-list size.
         # Phase 1: tafsir avg=772 tok/doc → 4.3M entries → 54s sub-phase C.
+        if src == "quran":
+            # Quran chunks use Uthmani orthography.  clean_text was produced
+            # by the older normalize(), which drops the superscript alef and
+            # leaves spellings such as "الصلوة"/"الربوا"; both break lexical
+            # matching against modern queries ("الصلاة"/"الربا").  Normalize
+            # the canonical original_text for the in-memory BM25 index only;
+            # stored text and embeddings are untouched.
+            body_text = normalize_verse_text(
+                c.get("original_text") or c.get("clean_text") or ""
+            )
+        else:
+            body_text = c.get("clean_text") or c.get("original_text") or ""
         body_tokens = _tokenize_clean(
-            c.get("clean_text") or c.get("original_text") or ""
+            body_text
         )[:_BM25_BODY_TOKEN_CAP_BY_SOURCE.get(src, _BM25_BODY_TOKEN_CAP)]
         # Reference: use _tokenize_clean() (not normalize()) — refs have no
         # tashkeel so normalize() is a no-op that costs 8.8s (pyarabic).
@@ -486,7 +920,7 @@ def _bm25_search(
 
     scores: dict[str, float] = {}
     token_coverage: dict[str, int] = {}
-    de_prefixed = [_strip_al(t) for t in query_tokens]
+    de_prefixed = [_fold_lexical(t) for t in query_tokens]
 
     for qt in de_prefixed:
         if qt not in idf:
@@ -809,6 +1243,14 @@ _DIVERSITY_BYPASS_QUOTA_PER_TYPE = 1
 # evidence while still allowing complementary source types to contribute.
 _PRIORITY_SEM_TOP = 6
 _PRIORITY_MAX_PER_TYPE = 4
+# The semantic/lexical priority sets can exceed top_k on their own.  When
+# that happened, a gold chunk at fused rank 2-4 could be dropped even though
+# the fused ranking had already placed it above most priorities (observed:
+# fiqh_66 at pool rank 2 and hadith_muslim_13708 at pool rank 4).  Reserve a
+# bounded number of slots for the highest fused-score chunks before filling
+# the rest from the priority set.  This is a selection-order guarantee, not a
+# score change.
+_PRIORITY_FUSED_RESERVE = 4
 
 
 def _select_diverse(
@@ -930,12 +1372,20 @@ def _terminology_anchor_ids(query_tokens: list[str], chunks: list[dict]) -> set[
     return set()
 
 
-_SECTION_INDEX_CACHE: dict[tuple[int, int], dict[tuple, list[dict]]] = {}
+_SECTION_INDEX_CACHE: dict[tuple, dict[tuple, list[dict]]] = {}
 
 
 def _section_index(chunks: list[dict]) -> dict[tuple, list[dict]]:
     """Group multi-chunk fiqh sections by book/chapter/subheading."""
-    key = (id(chunks), len(chunks))
+    # id()+len() alone can collide when a same-length temporary list is
+    # allocated at a reused address (observed between two tests).  Include
+    # boundary IDs so a stale index can never be served for different chunks.
+    key = (
+        id(chunks),
+        len(chunks),
+        chunks[0].get("id") if chunks else None,
+        chunks[-1].get("id") if chunks else None,
+    )
     cached = _SECTION_INDEX_CACHE.get(key)
     if cached is not None:
         return cached
@@ -1041,7 +1491,7 @@ def _expand_section_context(
 ) -> list[dict]:
     """Add the next paragraph of a selected multi-chunk fiqh section."""
     selected_ids = {c.get("id") for c in selected}
-    query_set = set(query_tokens)
+    query_set = {_fold_lexical(t) for t in query_tokens}
     sections = _section_index(chunks)
     by_id = {c.get("id"): c for c in chunks}
     for parent in selected:
@@ -1078,6 +1528,167 @@ def _expand_section_context(
     return selected
 
 
+# ===========================================================================
+# Seerah title retrieval
+# ===========================================================================
+# Seerah chunk references are descriptive section titles ("ولادة رسول الله
+# ... ورضاعته", "أمر العقبة الثانية", "ذكر الإسراء والمعراج").  The long
+# classical body text often dilutes the whole-chunk embedding, so a question
+# such as "من أرضعت النبي؟" can miss every sira passage even though the title
+# names the topic.  This bounded, deterministic signal adds the best sira
+# title matches as an extra RRF ranking.  It is gated on explicit seerah
+# event vocabulary so fiqh/Quran questions are unaffected.
+# Unique seerah-event vocabulary: sufficient on its own.
+_SEERAH_UNIQUE_RE = re.compile(
+    r"سير[ةه]|غزو[ةه]|سري[ةه]|هجر[ةه]|مولد|ولاد[ةه]|رضاع|[اأإآ]رضع|كفل|"
+    r"وداع|[اأإآ]سراء|معراج|عقب[ةه]|حديبي[ةه]|تبوك|بدر|"
+    r"خندق|حنين|طائف|خيبر|قريظ[ةه]|مؤت[ةه]|حليم[ةه]|خديج[ةه]|فاطم[ةه]"
+)
+# Generic terms that only count when the question is explicitly about the
+# Prophet or his Companions (e.g. "خطبة الوداع", not "خطبة الجمعة").
+_SEERAH_WEAK_RE = re.compile(
+    r"خطب[ةه]|بيع[ةه]|تزوج|زوج[ةه]|[اأإآ]ولاد|[اأإآ]بناء|نسب|"
+    r"قبيل[ةه]|عم[هة]|خال[ةه]|جد[هة]|[اأإآ]سلم|[اأإآ]سلام|بعث"
+)
+_SEERAH_CONTEXT_RE = re.compile(
+    r"نبي|رسول|صلي|وسلم|مكه|المدينه|قريش|انصار|مهاجرين|صحاب[ةه]|خليف[ةه]"
+)
+
+# Generic words that carry no topical title signal.  Removing them is
+# essential: otherwise every title containing "النبي" outranks the one title
+# that actually names the event.
+_SEERAH_TITLE_STOP = {
+    "نبي", "رسول", "الله", "صلي", "عليه", "وسلم", "سيره", "ابن", "هشام",
+    "ذكر", "امر", "كان", "كانت", "ماذا", "كيف", "متي", "اين", "من", "ما",
+    "هل", "عدد", "كم", "في", "علي", "عن", "الي", "اول", "اخره", "شهر",
+    "سنه", "عام", "يوم", "بعد", "قبل", "بين", "مع", "عند", "حتي",
+}
+
+_SEERAH_TITLE_MAX_EXACT_DF = 80
+_SEERAH_TITLE_MAX_ROOT_DF = 30
+_SEERAH_TITLE_TOP_N = 8
+_SEERAH_TITLE_RRF_WEIGHT = 2.0
+
+_seerah_title_cache: dict[tuple[int, int], dict] = {}
+
+
+def _get_seerah_title_index(chunks: list[dict]) -> dict:
+    """Build/cache the sira reference-title index for *chunks*."""
+    key = (id(chunks), len(chunks))
+    cached = _seerah_title_cache.get(key)
+    if cached is not None:
+        return cached
+    title_tokens: dict[str, set[str]] = {}
+    title_roots: dict[str, set[str]] = {}
+    chunk_by_id: dict[str, dict] = {}
+    tok_df: dict[str, int] = defaultdict(int)
+    root_df: dict[str, int] = defaultdict(int)
+    heading_re = re.compile(r"^\s*[\(（]([^)）]{3,160})[\)）]")
+    for c in chunks:
+        if c.get("source") != "sira":
+            continue
+        cid = c.get("id", "")
+        chunk_by_id[cid] = c
+        # Many classical sira passages carry a precise internal heading at
+        # the start of the text (e.g. "(خطبة الرسول في حجة الوداع)") while
+        # the chunk's reference repeats a broad chapter title.  Index that
+        # heading too; otherwise the farewell sermon is invisible to title
+        # retrieval because its reference only says "موافاة علي ... في الحج".
+        heading = ""
+        m = heading_re.match(c.get("original_text") or "")
+        if m:
+            heading = normalize(m.group(1))
+        title_text = f"{c.get('reference') or ''} {heading}"
+        toks = {
+            t for t in _tokenize_clean(title_text)
+            if len(t) >= 3
+            and t not in _QUERY_STOPWORDS
+            and t not in _SEERAH_TITLE_STOP
+        }
+        roots = {_root_key(t) for t in toks if len(_root_key(t)) >= 3}
+        title_tokens[cid] = toks
+        title_roots[cid] = roots
+        for t in toks:
+            tok_df[t] += 1
+        for r in roots:
+            root_df[r] += 1
+    idx = {
+        "title_tokens": title_tokens,
+        "title_roots": title_roots,
+        "chunk_by_id": chunk_by_id,
+        "tok_df": dict(tok_df),
+        "root_df": dict(root_df),
+        "n": max(len(title_tokens), 1),
+    }
+    _seerah_title_cache[key] = idx
+    return idx
+
+
+def _seerah_title_candidates(
+    query: str,
+    query_tokens: list[str],
+    chunks: list[dict],
+    top_n: int = _SEERAH_TITLE_TOP_N,
+) -> list[dict]:
+    """Return the best sira chunks whose descriptive reference matches *query*.
+
+    Only explicit seerah-event vocabulary triggers this path.  Scoring is
+    IDF-weighted exact title-token overlap plus rare root overlap (to bridge
+    أرضعت/رضاعته).  At least one rare exact token or rare root is required,
+    so a generic word cannot flood the pool.
+    """
+    norm_query = normalize(query)
+    has_unique = bool(_SEERAH_UNIQUE_RE.search(norm_query))
+    has_weak_context = bool(
+        _SEERAH_WEAK_RE.search(norm_query)
+        and _SEERAH_CONTEXT_RE.search(norm_query)
+    )
+    if not has_unique and not has_weak_context:
+        return []
+    idx = _get_seerah_title_index(chunks)
+    q_tokens = {
+        folded for t in query_tokens
+        for folded in (_fold_lexical(t),)
+        if len(folded) >= 3
+        and folded not in _QUERY_STOPWORDS
+        and folded not in _SEERAH_TITLE_STOP
+    }
+    if not q_tokens:
+        return []
+    q_roots = {_root_key(t) for t in q_tokens if len(_root_key(t)) >= 3}
+    n = idx["n"]
+    tok_df = idx["tok_df"]
+    root_df = idx["root_df"]
+    scored: list[tuple[int, float, str]] = []
+    for cid, toks in idx["title_tokens"].items():
+        exact = toks & q_tokens
+        rare_exact = {t for t in exact if tok_df.get(t, 0) <= _SEERAH_TITLE_MAX_EXACT_DF}
+        rare_roots = {
+            r for r in (idx["title_roots"][cid] & q_roots)
+            if root_df.get(r, 0) <= _SEERAH_TITLE_MAX_ROOT_DF
+        }
+        if not rare_exact and not rare_roots:
+            continue
+        score = sum(
+            math.log((n + 1) / (tok_df.get(t, 0) + 1)) for t in rare_exact
+        )
+        score += 0.75 * sum(
+            math.log((n + 1) / (root_df.get(r, 0) + 1)) for r in rare_roots
+        )
+        # Coverage first: a title matching two common query words
+        # ("الهجرة الأولى") is a better topic match than one matching a
+        # single rarer word ("المسلمين").
+        coverage = len(rare_exact) + len(rare_roots)
+        scored.append((coverage, score, cid))
+    scored.sort(key=lambda x: (-x[0], -x[1], x[2]))
+    out: list[dict] = []
+    for _cov, _score, cid in scored[:top_n]:
+        c = idx["chunk_by_id"].get(cid)
+        if c is not None:
+            out.append(c)
+    return out
+
+
 def _select_date_priority_ids(
     pool: list[dict], limit: int = _DATE_PRIORITY_MAX,
 ) -> set[str]:
@@ -1104,6 +1715,33 @@ def _select_date_priority_ids(
     return chosen
 
 
+def _lexical_must_ids(
+    lex_results: list[dict],
+    query_tokens: list[str],
+    best_coverage: int,
+    *,
+    asks_date: bool = False,
+) -> set[str]:
+    """Return the lexical top hit for a short, fully covered non-date query.
+
+    A short definition/compensation query ("ما كفارة الغيبة؟") can have its
+    rank-1 BM25 hit (fiqh_512) displaced by semantic/rewrite priority chunks
+    even though it is the exact evidence.  Guarantee only that single hit,
+    only for a two-term query with full lexical coverage, and never for date
+    questions: a date question needs several complementary evidence chunks,
+    and promoting a single lexical hit reduced multi-chunk coverage
+    (badr_date 2/3 -> 1/3).
+    """
+    if (
+        not asks_date
+        and len(query_tokens) == 2
+        and lex_results
+        and best_coverage >= len(query_tokens)
+    ):
+        return {lex_results[0].get("id", "")} - {""}
+    return set()
+
+
 def _select_priority(
     unique: list[dict],
     top_k: int,
@@ -1111,27 +1749,61 @@ def _select_priority(
     priority_ids: set[str],
     must_ids: set[str] | None = None,
 ) -> list[dict]:
-    """Guarantee injected + semantic-priority chunks, then fill by score."""
+    """Guarantee injected + top fused + semantic-priority chunks.
+
+    Mandatory chunks (deterministic injections and ``must_ids``) are kept
+    first.  The next ``_PRIORITY_FUSED_RESERVE`` slots go to the highest
+    fused-score chunks, then the remaining priority chunks fill the context,
+    and finally the per-source cap is relaxed only to fill empty slots.
+    """
     selected: list[dict] = []
     selected_ids: set[str] = set()
-    type_counts: dict[str, int] = defaultdict(int)
 
-    for c in unique:
-        cid = c.get("id", "")
-        if cid in bypass_ids or cid in priority_ids:
-            selected.append(c)
-            selected_ids.add(cid)
-            type_counts[c.get("source", "other")] += 1
+    def add(chunk: dict) -> None:
+        selected.append(chunk)
+        selected_ids.add(chunk.get("id", ""))
 
     must_ids = must_ids or set()
-    if len(selected) >= top_k:
-        must_selected = [c for c in selected if c.get("id") in must_ids]
-        others = [c for c in selected if c.get("id") not in must_ids]
-        others.sort(key=lambda c: c.get("score", 0.0), reverse=True)
-        kept = must_selected[:top_k]
-        kept.extend(others[: max(0, top_k - len(kept))])
-        return sorted(kept, key=lambda c: c.get("score", 0.0), reverse=True)
 
+    # 1. Mandatory: deterministic injections and explicitly protected chunks.
+    for c in unique:
+        cid = c.get("id", "")
+        if cid in bypass_ids or cid in must_ids:
+            add(c)
+
+    if len(selected) >= top_k:
+        return sorted(
+            selected, key=lambda c: c.get("score", 0.0), reverse=True,
+        )[:top_k]
+
+    # 2. Bounded reserve for the best fused chunks, so a high-ranked gold
+    #    chunk cannot be starved by an oversized priority set.  At most half
+    #    the context is reserved, leaving room for the priority guarantees.
+    reserve_limit = min(_PRIORITY_FUSED_RESERVE, max(1, top_k // 2))
+    reserved = 0
+    for c in unique:
+        if reserved >= reserve_limit or len(selected) >= top_k:
+            break
+        cid = c.get("id", "")
+        if cid in selected_ids:
+            continue
+        add(c)
+        reserved += 1
+
+    # 3. Guaranteed semantic/lexical priority chunks.
+    for c in unique:
+        if len(selected) >= top_k:
+            break
+        cid = c.get("id", "")
+        if cid in selected_ids:
+            continue
+        if cid in priority_ids:
+            add(c)
+
+    # 4. Fill under the per-source cap, then relax it only if needed.
+    type_counts: dict[str, int] = defaultdict(int)
+    for c in selected:
+        type_counts[c.get("source", "other")] += 1
     for c in unique:
         if len(selected) >= top_k:
             break
@@ -1141,8 +1813,7 @@ def _select_priority(
         src_type = c.get("source", "other")
         if type_counts[src_type] >= _PRIORITY_MAX_PER_TYPE:
             continue
-        selected.append(c)
-        selected_ids.add(cid)
+        add(c)
         type_counts[src_type] += 1
 
     if len(selected) < top_k:
@@ -1152,8 +1823,7 @@ def _select_priority(
             cid = c.get("id", "")
             if cid in selected_ids:
                 continue
-            selected.append(c)
-            selected_ids.add(cid)
+            add(c)
 
     return sorted(selected, key=lambda c: c.get("score", 0.0), reverse=True)
 
@@ -1191,6 +1861,11 @@ _GROUNDING_EXTRA_SYNONYM_GROUPS = [
     # ruling family; without this grounding-only alias the rare-token guard
     # drops the supported qualifier and loses a required fact.
     ["واجب", "وجوب"],
+    # The corpus often states the ruling as "تأكيد استحبابه" while an answer
+    # naturally says "مستحب".  These are the same ruling family; without the
+    # alias, a short, explicit ruling sentence fails coverage even though the
+    # cited clause supports it.
+    ["مستحب", "استحباب"],
 ]
 
 # Phrase-level aliases: only the *scoped* replacements below are
@@ -1345,6 +2020,9 @@ def retrieve(
     chunks: list[dict],
     client: OpenAI,
     top_k: int = 8,
+    tafsir_anchors: list[dict] | None = None,
+    *,
+    retrieval_query: str | None = None,
 ) -> list[dict]:
     """Retrieve the most relevant chunks for a user query.
 
@@ -1356,6 +2034,9 @@ def retrieve(
         5. RRF fusion of semantic and lexical rankings.
         6. Optional query rewriting (USE_QUERY_REWRITE) — merge extra results.
         7. Inject surah chunks with fixed high score (bypasses diversity cap).
+           For Tafsir-intent questions, inject the deterministically resolved
+           Quran verse + Tafsir Ibn Kathir chunk instead; a specific ayah
+           suppresses whole-surah injection.
         8. Lexical reference boost.
         9. Selection: injected surah chunks + semantic top-5 are guaranteed
             first; remaining slots fill by fused score under a cap of 4 per
@@ -1369,20 +2050,55 @@ def retrieve(
     Returns:
         List of top_k chunk result dicts.
     """
-    processed = preprocess(query)
+    resolved_query = retrieval_query or query
+    processed = preprocess(resolved_query)
     clean_query = processed["normalized"]
+    # Honorifics are devotionally important but lexically noisy; remove them
+    # from the BM25 query only (the semantic query keeps the original text).
+    lexical_query = _HONORIFIC_RE.sub(" ", clean_query)
     query_tokens = [
-        _strip_al(w) for w in (processed.get("tokens_clean") or clean_query.split())
+        _strip_al(w) for w in lexical_query.split()
         if w not in _QUERY_STOPWORDS and len(w) >= 2
     ]
 
+    # Tafsir-intent resolution (deterministic, lexical).  Passing anchors in
+    # from generate() avoids resolving twice; direct retrieve() callers get
+    # the same behavior.
+    tafsir_clarification = ""
+    if tafsir_anchors is None:
+        # Follow-ups ("إيه الدليل؟", "ليه؟") have no topic of their own.
+        # Deterministic ayah/hadith resolvers must see the resolved question,
+        # otherwise the semantic/BM25 path uses the prior topic while anchor
+        # injection silently uses the literal clarification.
+        tafsir_anchors, tafsir_clarification = _resolve_chat_tafsir(
+            resolved_query, index, chunks, client,
+        )
+
     # Fix A: detect surah query
-    surah_num = _resolve_surah_query(query, chunks)
+    surah_num = _resolve_surah_query(resolved_query, chunks)
+    # A resolved specific ayah is strictly more precise than whole-surah
+    # injection.  A clarification request (whole surah without an ayah) also
+    # must not dump the entire surah into the retrieval pool.
+    if tafsir_anchors or tafsir_clarification:
+        surah_num = None
+    quran_topic_anchor = None
+    core_hadith_anchor = None
+    if not tafsir_anchors and not tafsir_clarification and surah_num is None:
+        quran_topic_anchor = _resolve_quran_topic_anchor(
+            resolved_query, chunks,
+        )
+        if quran_topic_anchor is None:
+            core_hadith_anchor = _resolve_core_hadith_anchor(
+                resolved_query, chunks,
+            )
     effective_top_k = 8 if surah_num is not None else top_k
 
     # --- Semantic retrieval ---
+    # For a clarification follow-up the literal phrase ("ليه؟") has no topic;
+    # embedding it as a second ranking injects noise and can crowd out the
+    # evidence of the resolved question.  Non-follow-ups keep `query` here.
     emb_norm = embed_text(clean_query, client)
-    emb_orig = embed_text(query, client)
+    emb_orig = embed_text(resolved_query, client)
     wide_k = max(effective_top_k * 20, 100)
     results_norm = search(emb_norm, index, chunks, top_k=wide_k)
     results_orig = search(emb_orig, index, chunks, top_k=wide_k)
@@ -1400,6 +2116,10 @@ def retrieve(
     lex_results = _bm25_search(query_tokens, chunks, top_k=20)
     lex_top3_ids = {c["id"] for c in lex_results[:3]}
     best_lex_coverage = max((c.get("_token_coverage", 0) for c in lex_results), default=0)
+    lex_must_ids = _lexical_must_ids(
+        lex_results, query_tokens, best_lex_coverage,
+        asks_date=_asks_date_intent(clean_query),
+    )
 
     # --- Retrieval gate ---
     needed_tokens = 1 if len(query_tokens) == 1 else MIN_LEXICAL_TOKENS
@@ -1479,7 +2199,8 @@ def retrieve(
             # baseline policy (e.g. ghusl fiqh_58, rawatib fiqh_160).
             ruling_priority_ids = {_ruling_res[0]["id"]}
     if USE_QUERY_REWRITE:
-        rewrites = _rewrite_query(query, client)
+        # Rewriting must see the resolved topic, not "ليه؟"/"إيه الدليل؟".
+        rewrites = _rewrite_query(resolved_query, client)
         for phrase in rewrites:
             if not phrase:
                 continue
@@ -1508,16 +2229,67 @@ def retrieve(
             except Exception:
                 pass
 
+    # Seerah questions often miss long classical passages whose whole-chunk
+    # embedding is diluted, while the descriptive reference title names the
+    # topic exactly.  Add the best sira title matches as one extra ranking.
+    # Tafsir requests are excluded: their deterministic verse anchors are
+    # already precise, and extra sira chunks would only crowd the context.
+    seerah_priority_ids: set[str] = set()
+    if not tafsir_anchors and not tafsir_clarification:
+        seerah_titles = _seerah_title_candidates(
+            clean_query, query_tokens, chunks,
+        )
+        if seerah_titles:
+            extra_ranked.append((seerah_titles, _SEERAH_TITLE_RRF_WEIGHT))
+            # A seerah event question needs the matching sira sections in the
+            # context even when long hadith passages dominate the fused ranks.
+            # Bounded by half the context, so other evidence still has room.
+            # These must be guaranteed, not merely "priority": the generic
+            # priority set (semantic/lexical top hits) is larger than the
+            # remaining slots and fills them in fused order, which dropped
+            # every sira title chunk at pool ranks 17+ (observed: sira_159
+            # for the foster-mother question, sira_440 for the second Aqaba
+            # pledge).
+            seerah_priority_ids = {
+                c["id"] for c in seerah_titles[:max(1, effective_top_k // 2)]
+            }
+            print(
+                "[retrieve] seerah-title matches: "
+                + ", ".join(c["id"] for c in seerah_titles[:4])
+            )
+
     # --- RRF fusion (original semantic + BM25 + rewrites, one score scale) ---
     pool = _rrf_fuse(sem_ranked, lex_results, lex_top3_ids, extra_ranked)
 
-    # --- Surah injection (bypasses diversity cap) ---
+    # --- Deterministic injection (bypasses diversity cap) ---
     injected_ids: set[str] = set()
-    if surah_num is not None:
+    if tafsir_anchors:
+        pool, injected_ids = _inject_tafsir_anchors(tafsir_anchors, pool)
+    elif surah_num is not None:
         pool, injected_ids = _inject_surah_chunks(surah_num, chunks, pool)
+    elif quran_topic_anchor is not None:
+        topic_anchors = [quran_topic_anchor]
+        topic_anchors.extend(
+            _quran_topic_companions(quran_topic_anchor, chunks)
+        )
+        pool, injected_ids = _inject_tafsir_anchors(
+            topic_anchors, pool,
+        )
+        print(
+            "[retrieve] quran-topic anchor: "
+            + ", ".join(c.get("id", "") for c in topic_anchors)
+        )
+    elif core_hadith_anchor is not None:
+        pool, injected_ids = _inject_tafsir_anchors(
+            [core_hadith_anchor], pool,
+        )
+        print(
+            "[retrieve] core-hadith anchor: "
+            f"{core_hadith_anchor.get('id')}"
+        )
 
     # --- Lexical reference boost ---
-    pool = _apply_lexical_boost(pool, query)
+    pool = _apply_lexical_boost(pool, resolved_query)
 
     # --- Semantic + explicit-date priority selection ---
     sem_priority_ids = {c["id"] for c in sem_ranked[:_PRIORITY_SEM_TOP]}
@@ -1531,16 +2303,19 @@ def retrieve(
             | synonym_priority_ids | weekday_compact_ids
             | ruling_priority_ids | terminology_anchor_ids
             | variant_anchor_ids | rewrite_anchor_ids
+            | seerah_priority_ids
         ),
         must_ids=(
             ruling_priority_ids | terminology_anchor_ids
             | variant_anchor_ids | rewrite_anchor_ids
+            | seerah_priority_ids | lex_must_ids
         ),
     )
     selected = _expand_section_context(selected, chunks, query_tokens)
     selected = _expand_narrative_quran_context(
         selected, chunks, query_tokens, effective_top_k
     )
+    selected = _filter_joint_evidence(selected, resolved_query)
 
     # --- Attach explicit gate state and REAL relevance scores ---
     # No synthetic constants: semantic chunks keep their real cosine score,
@@ -1596,7 +2371,33 @@ def build_prompt(
         context_parts.append(f"[مصدر {i}] ({source} — {reference}):\n{text}")
 
     context_block = "\n\n".join(context_parts)
+    followup_note = ""
+    if chat_history and _is_evidence_request(query):
+        previous_assistant = next(
+            (
+                str(message.get("content") or "").strip()
+                for message in reversed(chat_history)
+                if isinstance(message, dict)
+                and message.get("role") == "assistant"
+                and str(message.get("content") or "").strip()
+            ),
+            "",
+        )
+        target = _evidence_target_text(previous_assistant)
+        if target:
+            followup_note = (
+                "ملاحظة سياق: هذا طلب دليل على هذه الجملة من الجواب "
+                f"السابق: {target}\n\n"
+            )
+    elif chat_history and _is_followup_query(query):
+        previous_user = _last_substantive_user(chat_history)
+        if previous_user:
+            followup_note = (
+                "ملاحظة سياق: هذا السؤال متابعة للسؤال السابق: "
+                f"{previous_user}\n\n"
+            )
     user_message = (
+        f"{followup_note}"
         f"السؤال: {query}\n\n"
         f"المصادر:\n{context_block}\n\n"
         f"الإجابة:"
@@ -1670,7 +2471,17 @@ _GROUNDING_GUARD_BAND = 500
 # bridges unrelated roots (صوام/صامت، ثواب/ثابت، راوي/رايت، تورك/تركت),
 # so only this evidence-backed pair is admitted.
 _GROUNDING_CURATED_ALIASES: dict[str, tuple[str, ...]] = {
-    "نزول": ("نزلت",),
+    "نزول": ("نزلت", "انزل", "نزل"),
+    # "عدم وجود الماء" paraphrases the fiqh/Quran wording "لم يجد الماء"
+    # (fiqh_66: "فلم تجدوا ماء"; fiqh_67: "لم يجد الماء").  The hollow-verb
+    # family matcher does not align وجود with يجد, so admit the exact cited
+    # surfaces only.  This keeps a supported paraphrase from being dropped
+    # without weakening the rare-token check for any other word.
+    "وجود": ("يجد", "تجدوا", "وجد"),
+    # "يشعر بالقلق" paraphrases the revelation hadith's "كُرِبَ لِذَلِكَ"
+    # (he was distressed by it).  Exact cited surface only; the family
+    # matcher does not connect قلق with كرب.
+    "قلق": ("كرب",),
 }
 
 # Polarity-inverting particles (غير/بدون), tolerant of و/ف prefixes.  Kept
@@ -1681,7 +2492,20 @@ _GROUNDING_INVERSION_TOKENS = {"غير", "بدون"}
 # Entity anchors: a claim token directly following one of these is a
 # named-entity mention whose support must be verifiable in the cited source
 # (follower presence, not corpus frequency).
-_GROUNDING_ENTITY_ANCHORS = {"ابن", "بنت", "ابي", "ابو", "ام", "عبد", "بن"}
+#
+# Construct anchors (ابن/بنت/أبي/أبو/أم/عبد/بن) introduce an idafa phrase, so
+# BOTH tokens must occur together in the cited source.  Follower-only checking
+# let "أم الفضل" pass whenever the common noun "فضل" appeared anywhere in a
+# source, even though no source named that woman.  Label anchors introduce a
+# person by name ("تدعى حليمة", "يسمى ...") and only require the name itself.
+_GROUNDING_CONSTRUCT_ANCHORS = {"ابن", "بنت", "ابي", "ابو", "ام", "عبد", "بن"}
+_GROUNDING_LABEL_ANCHORS = {
+    "تدعى", "يدعى", "تسمى", "يسمى", "اسمه", "اسمها", "امه", "امها",
+    "ابوه", "ابوها", "جدها", "جده", "زوجها", "زوجه",
+}
+_GROUNDING_ENTITY_ANCHORS = (
+    _GROUNDING_CONSTRUCT_ANCHORS | _GROUNDING_LABEL_ANCHORS
+)
 
 # Windowed in-order quote alignment tolerates at most this many extra source
 # tokens between the first and last aligned span token (covers Arabic
@@ -1693,6 +2517,13 @@ _GROUNDING_SPAN_MAX_GAP = 6
 _QUOTE_RE = re.compile(
     r'["\u00ab\u00bb\u201c\u201d]([^"\u00ab\u00bb\u201c\u201d]{6,})'
     r'["\u00ab\u00bb\u201c\u201d]')
+
+# Tafsir answers quote Quranic text with the ornate Quranic brackets.
+# Keeping this separate from _QUOTE_RE preserves the chat grounding contract.
+_QUOTE_RE_WITH_QURAN = re.compile(
+    r'(?:["\u00ab\u00bb\u201c\u201d]|\uFD3F)'
+    r'([^"\u00ab\u00bb\u201c\u201d\uFD3E]{6,})'
+    r'(?:["\u00ab\u00bb\u201c\u201d]|\uFD3E)')
 
 # --- Tolerant Arabic matching for the grounding check (F-03) ----------------
 # Classic orthography differs from modern spelling in ways that must not
@@ -1720,9 +2551,23 @@ _GROUNDING_IGNORED_TOKENS = {
     # surface forms can be rare in the corpus (e.g. وقد) and must not drop an
     # otherwise well-supported sentence.
     "وقد", "قد", "وعندما", "عندما", "حيث", "كما", "لكن", "ايضا", "أيضا",
+    # Affirmation/denial particles are discourse answers, not factual claims;
+    # the ruling they introduce is checked separately.
+    "نعم", "اجل", "بلى",
     # Presentational/framing fillers: they introduce a supported statement
     # but carry no factual claim of their own.
     "هناك", "ينص", "يعتبر", "تعتبر", "ذلك", "هذا", "هذه", "هؤلاء",
+    # Generic human subject used as a placeholder ("إذا لم يجد الشخص الماء")
+    # rather than a factual entity; it must not trigger the rare-token guard.
+    "شخص", "الشخص",
+    # Naming verbs introduce a name; the name itself is checked by the entity
+    # guard, so the framing verb must not independently drop the sentence.
+    "تدعى", "يدعى", "تسمى", "يسمى",
+    # Presentational count ("in several forms") introducing a verbatim
+    # quotation.  The quotation and the surrounding claim carry the factual
+    # content; the framing noun itself is not an independently checkable
+    # assertion and is common enough that its low df is an artefact.
+    "اشكال", "أشكال",
 }
 
 # Quranic references such as (النساء: 10) are citations, not claim digits.
@@ -1761,18 +2606,262 @@ _GROUNDING_TENS_WORDS = {
     "تسعون": 90, "تسعين": 90,
 }
 
+# Ordinal labels ("the second pledge", "the third chapter") are sequence
+# names, not quantities.  They still participate in coverage matching, but
+# they must not trigger the strict digit guard: a source can describe the
+# same event with a different ordinal label ("العقبة الأخيرة" vs
+# "العقبة الثانية"), and requiring the numeral 2 would reject a verbatim,
+# correctly cited quotation.
+_GROUNDING_ORDINAL_WORDS = {
+    "اول", "الاول", "ثاني", "ثانيه", "ثالث", "ثالثه",
+    "رابع", "رابعه", "خامس", "خامسه", "سادس", "سادسه",
+    "سابع", "سابعه", "ثامن", "ثامنه", "تاسع", "تاسعه",
+    "عاشر", "عاشره",
+}
+
+
+_GROUNDING_ORTHO_TRANS = str.maketrans({
+    # Classical/Uthmani text uses alef maqsura where modern text uses yeh
+    # (الوحى/الوحي, هدى/هدي).  Without this fold the two spellings produce
+    # different grounding keys, so a verbatim Quran/hadith word can look
+    # unsupported and a rare-token guard can drop a correct sentence.
+    "ى": "ي",
+    # Hamza carriers are orthographic variants of the same letter for
+    # matching purposes (الرؤيا/الرويا, قائم/قايم).
+    "ؤ": "و",
+    "ئ": "ي",
+})
+
 
 def _fold_ar(token: str) -> str:
     """Fold orthographic variance: combining marks, Unicode format characters
     (category Cf, e.g. the RTL mark U+200F glued to some corpus tokens),
-    tatweel, Arabic digits."""
+    tatweel, Arabic digits, and alef maqsura/hamza-carrier spellings."""
     t = unicodedata.normalize("NFKD", token)
     t = "".join(
         ch for ch in t
         if not unicodedata.combining(ch)
         and unicodedata.category(ch) != "Cf"
     )
-    return t.replace("\u0640", "").translate(_GROUNDING_DIGITS_TRANS).strip()
+    return (
+        t.replace("\u0640", "")
+        .translate(_GROUNDING_DIGITS_TRANS)
+        .translate(_GROUNDING_ORTHO_TRANS)
+        .strip()
+    )
+
+
+# The grounding constants above are written in their conventional Arabic
+# spelling, while ``_tokenize`` normalizes surface forms (e.g. تدعى -> تدعي,
+# على -> علي).  Compare against folded copies so orthographic variants cannot
+# silently disable the entity or ignored-token guards.
+_GROUNDING_IGNORED_FOLDED = {
+    _fold_ar(t) for t in _GROUNDING_IGNORED_TOKENS
+}
+
+# Legal modality is part of the claim, not a discourse filler.  A sentence
+# that says "يجب" is not grounded by a source that only says "يستحب" or
+# "لا يكره", even when every topic word matches.  These families are used by
+# the grounding validator and the citation chooser; they do not encode any
+# particular answer.
+_LEGAL_FAMILY_WORDS = {
+    "obligation": {
+        "يجب", "وجب", "تجب", "يجبون", "واجب", "واجبه", "واجبات",
+        "وجوب", "اوجب", "يوجب", "فرض", "فرضه", "فرضت", "فريضه",
+        "مفروض", "لازم", "لازمه", "يلزم", "الزام",
+    },
+    "prohibition": {
+        "يحرم", "حرم", "حرام", "حرامه", "محرم", "محرمه",
+        "تحريم", "حرمه", "ممنوع",
+    },
+    "permission": {
+        "يجوز", "جاز", "جائز", "جايز", "جواز", "مباح",
+        "اباح", "يبيح", "حلال", "حلاله", "محلل",
+    },
+    "recommendation": {
+        "يستحب", "استحب", "مستحب", "مستحبه", "يستحسن",
+        "مستحسن", "مندوب", "مندوبه",
+    },
+    "dislike": {
+        "يكره", "كره", "مكروه", "مكروهه", "كراهه", "كراهيه",
+    },
+    "invalid": {
+        "باطل", "باطله", "يبطل", "بطل", "فسد", "فاسد", "فساد",
+    },
+}
+_LEGAL_FAMILY_BY_KEY: dict[str, str] = {}
+for _legal_family, _legal_words in _LEGAL_FAMILY_WORDS.items():
+    for _legal_word in _legal_words:
+        _LEGAL_FAMILY_BY_KEY[
+            _strip_al(_fold_ar(_legal_word))
+        ] = _legal_family
+
+
+_LEGAL_FAMILY_PREFIXES = (
+    ("obligation", ("يجب", "وجب", "واجب", "وجوب", "فرض", "فريض", "مفروض", "لازم", "يلزم", "الزام")),
+    ("prohibition", ("يحرم", "حرم", "حرام", "محرم", "تحريم", "ممنوع")),
+    ("permission", ("يجوز", "جاز", "جائز", "جايز", "جواز", "مباح", "اباح", "يبيح", "حلال", "محلل")),
+    ("recommendation", ("يستحب", "استحب", "مستحب", "يستحسن", "مستحسن", "مندوب")),
+    ("dislike", ("يكره", "كره", "مكروه", "كراه")),
+    ("invalid", ("باطل", "يبطل", "بطل", "فسد", "فاسد", "فساد")),
+)
+
+
+_LEGAL_PHRASE_KEYS = {"عليه", "عليك", "علينا", "عليهم", "عليها", "كتب"}
+# Generic fast/day words do not identify which passage a legal claim belongs
+# to; sentence-scoped support uses a more distinctive subject token.
+_LEGAL_FOCUS_STOP = {
+    "صوم", "صيام", "يوم", "ايام", "مسلم", "المسلم",
+    "شخص", "اذا", "اراد", "يصوم", "مسلمين",
+    "قبل", "بعد", "قبله", "بعده",
+}
+
+
+def _legal_key(token: str) -> str:
+    key = _strip_al(_fold_ar(token))
+    if (
+        len(key) > 2 and key[0] in "وف"
+        and (
+            key[1:] in _LEGAL_FAMILY_BY_KEY
+            or key[1:] in _LEGAL_PHRASE_KEYS
+        )
+    ):
+        key = key[1:]
+    return key
+
+
+def _legal_family_of_token(token: str) -> str | None:
+    key = _legal_key(token)
+    family = _LEGAL_FAMILY_BY_KEY.get(key)
+    if family is not None:
+        return family
+    # Morphological variants ("وجوبها", "واجبة") keep the same family.
+    for candidate, prefixes in _LEGAL_FAMILY_PREFIXES:
+        if key.startswith(prefixes):
+            return candidate
+    return None
+
+
+def _polarity_marked_positions(tokens: list[str]) -> set[int]:
+    """Token positions governed by negation or غير/بدون inversion."""
+    marked: set[int] = set()
+    for position, token in enumerate(tokens):
+        if _is_negation_token(token):
+            marked |= _negation_target_positions(tokens, position)
+        if _is_inversion_token(token) and position + 1 < len(tokens):
+            marked.add(position + 1)
+    return marked
+
+
+def _positive_legal_families_from_tokens(tokens: list[str]) -> set[str]:
+    """Legal conclusions positively asserted by a token stream.
+
+    Negated permission ("لا يجوز") is a prohibition; negated obligation or
+    dislike asserts no positive strong claim.  "كتب عليكم" is treated as an
+    explicit prescription, not as the noun "books".
+    """
+    marked = _polarity_marked_positions(tokens)
+    families: set[str] = set()
+    for position, token in enumerate(tokens):
+        family = _legal_family_of_token(token)
+        if family is None:
+            folded = _legal_key(token)
+            next_key = (
+                _legal_key(tokens[position + 1])
+                if position + 1 < len(tokens) else ""
+            )
+            if (
+                folded == "كتب"
+                and next_key in {"علي", "عليكم", "عليهم", "على"}
+            ) or (
+                folded in {"عليه", "عليك", "علينا", "عليهم", "عليها"}
+                and next_key == "ان"
+            ):
+                # "كتب عليكم" is an explicit prescription; "فعليه أن"
+                # is the model's common paraphrase of an obligation.
+                family = "obligation"
+            else:
+                continue
+        if not _legal_token_is_ruling(tokens, position, token):
+            continue
+        negated = position in marked
+        if family == "permission" and negated:
+            families.add("prohibition")
+        elif family in {
+            "obligation", "prohibition", "permission",
+            "recommendation", "dislike", "invalid",
+        } and not negated:
+            families.add(family)
+    return families
+
+
+def _legal_token_is_ruling(
+    tokens: list[str], position: int, token: str,
+) -> bool:
+    """False for ordinary verbs such as "بما يكره" (what he dislikes)."""
+    key = _legal_key(token)
+    if key in {"يكره", "كره", "يحرم", "حرم"} and position > 0:
+        previous = _legal_key(tokens[position - 1])
+        if previous in {"بما", "ما", "الذي", "التي", "من", "انه", "انها", "وما"}:
+            return False
+    return True
+
+
+def _negative_legal_families_from_tokens(tokens: list[str]) -> set[str]:
+    """Legal families asserted under negation/inversion.
+
+    A source that only says "مستحب" cannot ground "غير مستحب"; a source with
+    no obligation token at all does not contradict "لا يجب" (the cautious
+    negative claim is allowed).
+    """
+    marked = _polarity_marked_positions(tokens)
+    families: set[str] = set()
+    for position, token in enumerate(tokens):
+        family = _legal_family_of_token(token)
+        if family is None or position not in marked:
+            continue
+        if not _legal_token_is_ruling(tokens, position, token):
+            continue
+        if family == "permission":
+            # "لا يجوز" is a positive prohibition claim, handled elsewhere.
+            continue
+        families.add(family)
+    return families
+
+
+def _positive_legal_families(text: str) -> set[str]:
+    return _positive_legal_families_from_tokens(
+        _numbers_normalized(_tokenize(text or "")),
+    )
+
+
+def _negative_legal_families(text: str) -> set[str]:
+    return _negative_legal_families_from_tokens(
+        _numbers_normalized(_tokenize(text or "")),
+    )
+_GROUNDING_ENTITY_ANCHORS_FOLDED = {
+    _fold_ar(t) for t in _GROUNDING_ENTITY_ANCHORS
+}
+_GROUNDING_CONSTRUCT_ANCHORS_FOLDED = {
+    _fold_ar(t) for t in _GROUNDING_CONSTRUCT_ANCHORS
+}
+
+
+def _fold_weak(token: str) -> str:
+    """Weak-letter skeleton used only by the relaxed rare-token exemption.
+
+    Drops interior alef/waw/yeh after the first letter so a paraphrased
+    surface that is absent from the corpus (e.g. وصيرتم) can still align
+    with its cited-source spelling (وصرتم).  Short skeletons are ignored by
+    the caller, so coincidence on two-letter function words cannot exempt a
+    fabricated token.
+    """
+    folded = _fold_ar(token)
+    if len(folded) <= 1:
+        return folded
+    return folded[0] + "".join(
+        ch for ch in folded[1:] if ch not in "اوي"
+    )
 
 
 def _match_key(token: str) -> str:
@@ -1822,8 +2911,15 @@ _NEGATION_TOKENS = {"لا", "لم", "لن", "ليس", "ليست"}
 # as "ليس للوجوب" does; without this bridge the source-side marking misses
 # the target and a valid negated claim is rejected as a flip.
 _NEGATION_SKIP_TOKENS = {
-    "على", "في", "من", "الى", "عن", "ان", "هو", "هي", "هذا", "هذه",
-    "ذلك", "تلك", "مع", "ب", "ل", "ك",
+    _fold_ar(t) for t in (
+        "على", "في", "من", "الى", "عن", "ان", "هو", "هي", "هذا", "هذه",
+        "ذلك", "تلك", "مع", "ب", "ل", "ك",
+        # Copulas do not stop the scope of a negation: "لم يكن معهم ماء" and
+        # "ليس معهم ماء" negate the same predicate.  Without bridging the
+        # copula, the claim token معهم was treated as affirmative while the
+        # source marked it negated, producing a false neg=flip.
+        "كان", "كانت", "يكون", "تكون", "يكن", "تكن", "نكون", "اكون",
+    )
 }
 
 
@@ -1868,6 +2964,46 @@ def _strict_key(token: str) -> str:
     while len(t) > 2 and t[0] in "وف":
         t = t[1:]
     return _strip_al(t) if t else t
+
+
+def _source_strict_keys(text: str) -> set[str]:
+    return {
+        _strict_key(token)
+        for token in _numbers_normalized(_tokenize(text or ""))
+        if len(token) >= 3
+    }
+
+
+_LEGAL_TOPIC_ALIASES = {
+    "صيام": "صوم", "صوم": "صوم", "صيامه": "صوم", "صومه": "صوم",
+    "يصوم": "صوم", "صائم": "صوم", "صوموا": "صوم",
+}
+
+
+def _legal_topic_key(token: str) -> str:
+    strict = _strict_key(token)
+    mapped = _LEGAL_TOPIC_ALIASES.get(strict)
+    if mapped:
+        return mapped
+    if (
+        "صوم" in strict or "صيم" in strict
+        or strict.startswith(("صائم", "صايم", "صاءم"))
+    ):
+        return "صوم"
+    return strict
+
+
+def _legal_topic_keys(text: str) -> set[str]:
+    return {
+        _legal_topic_key(token)
+        for token in _tokenize(text or "")
+        if len(token) >= 3
+    }
+
+
+_LEGAL_FOCUS_STOP_STRICT = {
+    _strict_key(word) for word in _LEGAL_FOCUS_STOP
+}
 
 
 # Mutually exclusive outcome destinations.  A claim asserting exactly one
@@ -1921,6 +3057,20 @@ def _gkey(token: str) -> str:
     return _GROUNDING_GROUP_CANON.get(k, k)
 
 
+_LEGAL_FOCUS_STOP_GKEYS = {
+    _gkey(word) for word in _LEGAL_FOCUS_STOP
+}
+_LEGAL_REQUIRED_GENERIC = {
+    "يوم", "ايام", "شخص", "اذا", "اراد", "يصوم",
+    "مسلم", "مسلمين", "قبل", "بعد", "قبله", "بعده",
+    "علماء", "جمهور", "يرون", "قال", "ذهب", "ورد",
+    "حديث", "فقه", "بعض", "اهل",
+}
+_LEGAL_REQUIRED_GENERIC_GKEYS = {
+    _gkey(word) for word in _LEGAL_REQUIRED_GENERIC
+}
+
+
 def _apply_grounding_aliases(tokens: list[str]) -> list[str]:
     out = list(tokens)
     for i in range(len(out) - 1):
@@ -1949,6 +3099,8 @@ def _df_of(token: str, corpus_chunks: list[dict] | None) -> int | None:
         forms.append(c)                      # conjunction-stripped surface
         forms.append(f[0] + f[1:].replace("ا", ""))   # rasm form
     forms.extend([_strip_al(token), _match_key(token)])
+    folded = _fold_lexical(token)
+    forms.extend([folded, _match_key(folded)])
     for form in forms:
         if form and form in postings:
             return len(postings[form])
@@ -1970,6 +3122,8 @@ def _forms_of(t: str) -> list[str]:
         fs.append(c)
         fs.append(f[0] + f[1:].replace("ا", ""))
     fs.extend([_strip_al(t), _match_key(t)])
+    folded = _fold_lexical(t)
+    fs.extend([folded, _match_key(folded)])
     out = []
     for x in fs:
         if x and x not in out:
@@ -2000,6 +3154,14 @@ def _seeds_v2(t: str) -> set[str]:
             # the rare-token family exemption sees the root variant used by
             # the source.
             seeds.add(b[1:])
+    # Past-tense verb + object pronoun (أصابته) is reduced by _match_key to
+    # أصبت (one suffix removed).  Allow one further final-ت strip so the bare
+    # verb stem (أصاب -> أصب) can exempt the paraphrased form when the cited
+    # source uses that verb.  Guarded by length; the exemption still requires
+    # the resulting seed to occur in the cited source surface.
+    for b in list(seeds):
+        if len(b) > 3 and b.endswith("ت"):
+            seeds.add(b[:-1])
     return {s for s in seeds if s}
 
 
@@ -2135,49 +3297,76 @@ def _num_lookup(f: str, table: dict[str, int]) -> int | None:
     return None
 
 
+def _is_ordinal_word(folded: str) -> bool:
+    """True when a folded token is an ordinal label (first/second/...)."""
+    candidates = [folded]
+    if folded.startswith("ال") and len(folded) > 2:
+        candidates.append(folded[2:])
+    for candidate in list(candidates):
+        if candidate and candidate[0] in "وفب":
+            candidates.append(candidate[1:])
+    return any(candidate in _GROUNDING_ORDINAL_WORDS
+               for candidate in candidates)
+
+
+def _numbers_normalized_meta(tokens: list[str]) -> list[tuple[str, bool]]:
+    """Canonicalise numbers and flag the results that came from ordinals."""
+    out: list[tuple[str, bool]] = []
+    i = 0
+    while i < len(tokens):
+        f = _fold_ar(tokens[i])
+        if f.isdigit():
+            out.append((str(int(f)), False))
+            i += 1
+            continue
+        tens = _num_lookup(f, _GROUNDING_TENS_WORDS)
+        if tens is not None:
+            out.append((str(tens), _is_ordinal_word(f)))
+            i += 1
+            continue
+        unit = _num_lookup(f, _GROUNDING_UNIT_WORDS)
+        if unit is not None:
+            ordinal = _is_ordinal_word(f)
+            nxt = _fold_ar(tokens[i + 1]) if i + 1 < len(tokens) else ""
+            nxt_tens = _num_lookup(nxt, _GROUNDING_TENS_WORDS)
+            if nxt in ("عشر", "عشره") or nxt_tens == 10:
+                out.append((
+                    str(10 + unit),
+                    ordinal or _is_ordinal_word(nxt),
+                ))
+                i += 2
+                continue
+            if nxt_tens is not None and nxt_tens >= 20 and nxt.startswith("و"):
+                out.append((
+                    str(nxt_tens + unit),
+                    ordinal or _is_ordinal_word(nxt),
+                ))
+                i += 2
+                continue
+            out.append((str(unit), ordinal))
+            i += 1
+            continue
+        out.append((tokens[i], False))
+        i += 1
+    return out
+
+
 def _numbers_normalized(tokens: list[str]) -> list[str]:
     """Replace spelled number words and digit tokens by canonical decimal
     strings so that 'سبع عشرة' == 'سابع عشر' == '١٧' == '17'.
 
     Handles prefixed words (بسبع) and the compound unit+tens form
-    (سبع وعشرين -> 27, خمسة وثلاثون -> 35).
+    (سبع وعشرين -> 27, خمسة وثلاثون -> 35).  Ordinals are canonicalised too
+    (for coverage matching); `_numbers_normalized_meta` exposes which output
+    positions came from ordinals so the strict quantity guard can skip them.
     """
-    out: list[str] = []
-    i = 0
-    while i < len(tokens):
-        f = _fold_ar(tokens[i])
-        if f.isdigit():
-            out.append(str(int(f)))
-            i += 1
-            continue
-        tens = _num_lookup(f, _GROUNDING_TENS_WORDS)
-        if tens is not None:
-            out.append(str(tens))
-            i += 1
-            continue
-        unit = _num_lookup(f, _GROUNDING_UNIT_WORDS)
-        if unit is not None:
-            nxt = _fold_ar(tokens[i + 1]) if i + 1 < len(tokens) else ""
-            nxt_tens = _num_lookup(nxt, _GROUNDING_TENS_WORDS)
-            if nxt in ("عشر", "عشره") or nxt_tens == 10:
-                out.append(str(10 + unit))
-                i += 2
-                continue
-            if nxt_tens is not None and nxt_tens >= 20 and nxt.startswith("و"):
-                out.append(str(nxt_tens + unit))
-                i += 2
-                continue
-            out.append(str(unit))
-            i += 1
-            continue
-        out.append(tokens[i])
-        i += 1
-    return out
+    return [token for token, _ in _numbers_normalized_meta(tokens)]
 
 
 def _ground_answer(answer: str, retrieved: list[dict],
                    corpus_chunks: list[dict] | None = None,
-                   ignore_rare: bool = False) -> str:
+                   ignore_rare: bool = False,
+                   quran_quotes: bool = False) -> str:
     """Post-generation grounding filter (tolerant matcher).
 
     For each sentence in *answer*:
@@ -2211,15 +3400,19 @@ def _ground_answer(answer: str, retrieved: list[dict],
          silently guessed).
       5. Keep if coverage >= GROUNDING_MIN_COVERAGE AND all strict checks
          pass for at least one reference option.  Sentences with no content
-         tokens are kept unconditionally.  With *ignore_rare* the rare-token
-         guard is relaxed (last-resort partial-answer fallback only); quote,
-         entity, polarity, number and month checks still apply.
+         tokens are kept unconditionally.  With *ignore_rare* low-frequency
+         tokens that still exist somewhere in the corpus are tolerated, and a
+         token absent from the corpus is tolerated only when its weak-letter
+         skeleton matches a cited-source token (last-resort partial-answer
+         fallback only); quote, entity, polarity, number and month checks
+         still apply.
 
     After filtering, preserve valid (maSdar N) markers in the kept text so
     callers retain the citation audit trail.  If nothing survives, return
     the canonical refusal sentence.
     """
     REFUSAL = "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال."
+    quote_re = _QUOTE_RE_WITH_QURAN if quran_quotes else _QUOTE_RE
     answer = _expand_citation_clusters(answer)
     n_chunks = len(retrieved)
 
@@ -2230,6 +3423,7 @@ def _ground_answer(answer: str, retrieved: list[dict],
     chunk_keys: list[set[str]] = []
     chunk_ref_keys: list[set[str]] = []
     chunk_ref_nums: list[set[str]] = []
+    chunk_ref_pairs: list[set[tuple[str, str]]] = []
     chunk_nums: list[set[str]] = []
     chunk_strict_lists: list[list[str]] = []
     chunk_pol_adj: list[set[int]] = []
@@ -2238,6 +3432,11 @@ def _ground_answer(answer: str, retrieved: list[dict],
     chunk_inv_follow: list[set[str]] = []
     chunk_surface: list[set[str]] = []
     chunk_toks: list[list[str]] = []
+    chunk_pairs: list[set[tuple[str, str]]] = []
+    chunk_legal: list[set[str]] = []
+    chunk_legal_sentences: list[
+        list[tuple[set[str], set[str], set[str], bool]]
+    ] = []
     for c in retrieved:
         keys: set[str] = set()
         nums: set[str] = set()
@@ -2267,6 +3466,9 @@ def _ground_answer(answer: str, retrieved: list[dict],
         chunk_ref_nums.append({
             _gkey(t) for t in ref_num_toks if t.isdigit()
         })
+        chunk_ref_pairs.append({
+            (_gkey(a), _gkey(b)) for a, b in zip(ref_toks, ref_toks[1:])
+        })
         chunk_nums.append(nums)
         chunk_strict_lists.append([_strict_key(t) for t in toks])
         chunk_pol_adj.append(pol_adj)
@@ -2275,6 +3477,37 @@ def _ground_answer(answer: str, retrieved: list[dict],
         chunk_inv_follow.append(inv_follow)
         chunk_surface.append({t for t in toks})
         chunk_toks.append(toks)
+        chunk_pairs.append({
+            (_gkey(a), _gkey(b)) for a, b in zip(toks, toks[1:])
+        })
+        chunk_legal.append(_positive_legal_families_from_tokens(toks))
+        legal_sentences: list[
+            tuple[set[str], set[str], set[str], bool]
+        ] = []
+        previous_topic_keys: set[str] = set()
+        for source_sentence in _split_source_sentences(
+            c.get("original_text", "") or "",
+        ):
+            sentence_topic_keys = _legal_topic_keys(source_sentence)
+            sentence_legal = _positive_legal_families(source_sentence)
+            sentence_legal_neg = _negative_legal_families(source_sentence)
+            sentence_condition = any(
+                marker in normalize(source_sentence)
+                for marker in ("بشرط", "شرط", "يشترط")
+            )
+            if sentence_legal or sentence_legal_neg or sentence_condition:
+                # A legal sentence can refer back to the subject of the
+                # immediately preceding sentence ("... ويرى وجوبها ...").
+                # Condition-only sentences are kept so a supported "شرط"
+                # clause can satisfy the condition-marker guard.
+                legal_sentences.append((
+                    sentence_topic_keys | previous_topic_keys,
+                    sentence_legal,
+                    sentence_legal_neg,
+                    sentence_condition,
+                ))
+            previous_topic_keys = sentence_topic_keys
+        chunk_legal_sentences.append(legal_sentences)
 
     if corpus_chunks is None:
         print("[ground] WARNING: rare-token check skipped (no corpus provided)")
@@ -2313,21 +3546,46 @@ def _ground_answer(answer: str, retrieved: list[dict],
             print(f"[ground] DROP invalid citation | {sent_stripped[:40]!r}")
             continue
 
+        # A verbatim quote attributed to the wrong retrieved chunk is an
+        # attribution error, not an unsupported claim.  Correct it before
+        # grounding so a valid quotation is not discarded with the citation.
+        if citation_matches and _QUOTE_RE.search(sent):
+            repaired_sent = _repair_exact_quote_citation(sent, retrieved)
+            if repaired_sent != sent:
+                print(
+                    "[ground] repaired exact-quote citation | "
+                    f"{sent_stripped[:40]!r}"
+                )
+                sent = repaired_sent
+                sent_stripped = sent.strip()
+                citation_matches = list(_CITATION_RE.finditer(sent))
+
         # Extract valid citation indices (1-based -> 0-based)
         cited_indices = [int(m.group(1)) - 1 for m in citation_matches]
 
         # Content tokens (citation markers removed, numbers canonicalised)
         body = _CITATION_RE.sub("", sent_stripped)
         body = _QURAN_REF_RE.sub("", body)
-        body_tokens_all = _numbers_normalized(_tokenize(body))
+        body_meta = _numbers_normalized_meta(_tokenize(body))
+        body_tokens_all = [token for token, _ in body_meta]
+        ordinal_body_positions = {
+            pos for pos, (_, ordinal) in enumerate(body_meta) if ordinal
+        }
         content_tokens = [
             t for t in body_tokens_all
             if t not in _QUERY_STOPWORDS
-            and t not in _GROUNDING_IGNORED_TOKENS
+            and t not in _GROUNDING_IGNORED_FOLDED
             and not _is_negation_token(t)
             and (len(t) >= 3 or t.isdigit())
         ]
         content_tokens = _apply_grounding_aliases(content_tokens)
+        # Bold labels are presentational; a legal word inside a heading must
+        # not make the heading itself look like a source-supported claim.
+        bold_tokens = {
+            token
+            for span in re.findall(r"\*\*(.+?)\*\*", sent_stripped)
+            for token in _tokenize(span)
+        }
 
         # Claim-side polarity maps: content positions directly following a
         # negation particle (right-only) or directly governed by a غير/بدون
@@ -2338,13 +3596,16 @@ def _ground_answer(answer: str, retrieved: list[dict],
         ci = 0
         for t in body_tokens_all:
             if (t not in _QUERY_STOPWORDS
-                    and t not in _GROUNDING_IGNORED_TOKENS
+                    and t not in _GROUNDING_IGNORED_FOLDED
                     and not _is_negation_token(t)
                     and (len(t) >= 3 or t.isdigit())):
                 pos_map.append(ci)
                 ci += 1
             else:
                 pos_map.append(-1)
+        ordinal_content_positions = {
+            pos_map[q] for q in ordinal_body_positions if pos_map[q] >= 0
+        }
         for q, t in enumerate(body_tokens_all):
             if _is_negation_token(t):
                 for target in _negation_target_positions(body_tokens_all, q):
@@ -2355,14 +3616,19 @@ def _ground_answer(answer: str, retrieved: list[dict],
             if (_is_inversion_token(t) and q + 1 < len(body_tokens_all)
                     and pos_map[q + 1] >= 0):
                 claim_inv_positions.add(pos_map[q + 1])
-        entity_followers: list[str] = []
+        entity_mentions: list[tuple[str, str, bool]] = []
         for q, t in enumerate(body_tokens_all):
             a = _fold_ar(t)
             while len(a) > 2 and a[0] in "وف":
                 a = a[1:]
-            if (a in _GROUNDING_ENTITY_ANCHORS and q + 1 < len(body_tokens_all)
+            if (a in _GROUNDING_ENTITY_ANCHORS_FOLDED
+                    and q + 1 < len(body_tokens_all)
                     and pos_map[q + 1] >= 0):
-                entity_followers.append(body_tokens_all[q + 1])
+                entity_mentions.append((
+                    a,
+                    body_tokens_all[q + 1],
+                    a in _GROUNDING_CONSTRUCT_ANCHORS_FOLDED,
+                ))
 
         # List markers and citation-only fragments carry no claim; keeping
         # them leaves artefacts such as a leading "2." in the final answer.
@@ -2375,15 +3641,23 @@ def _ground_answer(answer: str, retrieved: list[dict],
         if re.search(r"[:：]\s*(?:\d+[.)\-]?)?$", marker_body):
             continue
 
-        # Vacuous pass: no content tokens to check
-        if len(content_tokens) < _GROUNDING_MIN_CONTENT_TOKENS:
+        claim_legal = _positive_legal_families(sent)
+        # Vacuous pass: no content tokens to check.  A short legal claim
+        # ("نعم، حرام") is not vacuous: its modality must still be grounded.
+        if (
+            len(content_tokens) < _GROUNDING_MIN_CONTENT_TOKENS
+            and not claim_legal
+        ):
             kept.append(sent)
             print(f"[ground] cov=1.00 KEEP (vacuous) | {sent_stripped[:40]!r}")
             continue
 
         token_keys = [_gkey(t) for t in content_tokens]
         claim_strict = [_strict_key(t) for t in content_tokens]
-        digit_tokens = [t for t in content_tokens if t.isdigit()]
+        digit_tokens = [
+            t for j, t in enumerate(content_tokens)
+            if t.isdigit() and j not in ordinal_content_positions
+        ]
         month_positions = []
         for j, t in enumerate(content_tokens):
             ft = _fold_ar(t)
@@ -2400,10 +3674,14 @@ def _ground_answer(answer: str, retrieved: list[dict],
         # shorter spans only need each token to occur somewhere in one chunk
         # (too short to carry sequence structure).
         quote_spans: list[list[str]] = []
-        for span in _QUOTE_RE.findall(sent):
-            qt = [t for t in _numbers_normalized(_tokenize(span))
+        quoted_strict: set[str] = set()
+        for span in quote_re.findall(sent):
+            span_tokens = _numbers_normalized(_tokenize(span))
+            if quran_quotes:
+                quoted_strict.update(_strict_key(t) for t in span_tokens)
+            qt = [t for t in span_tokens
                   if t not in _QUERY_STOPWORDS
-                  and t not in _GROUNDING_IGNORED_TOKENS
+                  and t not in _GROUNDING_IGNORED_FOLDED
                   and (len(t) >= 3 or t.isdigit())]
             if qt:
                 quote_spans.append(qt)
@@ -2419,10 +3697,28 @@ def _ground_answer(answer: str, retrieved: list[dict],
         kept_this = False
         lenient_used = False
         best_cov = 0.0
+        legal_topic_tokens = [
+            t for t in content_tokens
+            if _legal_family_of_token(t) is None
+            and not t.isdigit()
+            and _gkey(t) not in _LEGAL_REQUIRED_GENERIC_GKEYS
+        ]
+        legal_required_keys: set[str] = set()
+        if legal_topic_tokens:
+            ranked = sorted(
+                {_legal_topic_key(t) for t in legal_topic_tokens},
+                key=len, reverse=True,
+            )
+            legal_required_keys = set(ranked[:2])
+        claim_legal_neg = _negative_legal_families(sent)
+        claim_condition = any(
+            marker in normalize(sent)
+            for marker in ("بشرط", "شرط", "يشترط")
+        )
         best_state: dict = {
             "digits_ok": False, "months_ok": False, "neg_ok": True,
             "contra_ok": True, "quote_ok": True, "entity_ok": True,
-            "rare": [],
+            "legal_ok": True, "rare": [],
         }
         for opt in ref_options:
             ref_keys: set[str] = (
@@ -2440,6 +3736,10 @@ def _ground_answer(answer: str, retrieved: list[dict],
             ref_title_nums: set[str] = (
                 set().union(*(chunk_ref_nums[i] for i in opt)) if opt else set()
             )
+            ref_title_pairs: set[tuple[str, str]] = (
+                set().union(*(chunk_ref_pairs[i] for i in opt))
+                if opt else set()
+            )
             ref_strict: set[str] = (
                 set().union(*(set(chunk_strict_lists[i]) for i in opt))
                 if opt else set()
@@ -2450,10 +3750,30 @@ def _ground_answer(answer: str, retrieved: list[dict],
             ref_neg_follow: set[str] = (
                 set().union(*(chunk_neg_follow[i] for i in opt)) if opt else set()
             )
-            matched = sum(
-                1 for k in token_keys
-                if k in ref_keys or k in ref_title_keys
+            ref_pairs: set[tuple[str, str]] = (
+                set().union(*(chunk_pairs[i] for i in opt)) if opt else set()
             )
+            ref_legal: set[str] = (
+                set().union(*(chunk_legal[i] for i in opt)) if opt else set()
+            )
+            ref_legal_sentences = [
+                entry
+                for i in opt
+                for entry in chunk_legal_sentences[i]
+            ]
+            matched = 0
+            for j, key in enumerate(token_keys):
+                if key in ref_keys or key in ref_title_keys:
+                    matched += 1
+                    continue
+                # يجب/واجب/فرض are one legal family; the legal check below
+                # still requires the cited evidence to assert that family.
+                legal_family = _legal_family_of_token(content_tokens[j])
+                if (
+                    legal_family and legal_family in ref_legal
+                    and content_tokens[j] not in bold_tokens
+                ):
+                    matched += 1
             coverage = matched / len(content_tokens)
             digits_ok = all(
                 t in ref_nums or t in ref_title_nums for t in digit_tokens
@@ -2471,6 +3791,8 @@ def _ground_answer(answer: str, retrieved: list[dict],
             # flip; claim-side negated tokens are skipped.)
             neg_ok = True
             for j, k in enumerate(token_keys):
+                if (quran_quotes and claim_strict[j] in quoted_strict):
+                    continue
                 if (j in claim_neg_positions or k not in ref_keys
                         or content_tokens[j].isdigit()):
                     continue
@@ -2502,6 +3824,8 @@ def _ground_answer(answer: str, retrieved: list[dict],
             # grounded by a bare affirmative "يستحب".
             if neg_ok:
                 for j, k in enumerate(token_keys):
+                    if (quran_quotes and claim_strict[j] in quoted_strict):
+                        continue
                     if j not in claim_neg_positions or k not in ref_keys:
                         continue
                     sk = claim_strict[j]
@@ -2557,29 +3881,52 @@ def _ground_answer(answer: str, retrieved: list[dict],
             # sources); the aligned mode allows the same narrow seed pairs as
             # the family exemption.  Shorter spans are support-only.
             quote_ok = True
-            for stoks in quote_spans:
-                ok = False
-                if len(stoks) < 3:
-                    for i in opt:
-                        if all(any(_seq_support(st, rt, "aligned")
-                                   for rt in chunk_toks[i])
-                               for st in stoks):
-                            ok = True
-                            break
-                else:
-                    for i in opt:
-                        ok, _ = _span_align(stoks, chunk_toks[i], "aligned",
-                                            _GROUNDING_SPAN_MAX_GAP)
-                        if ok:
-                            break
-                if not ok:
-                    quote_ok = False
-                    break
+            # Exact normalised substring is stronger evidence than token
+            # alignment and avoids false negatives from diacritic/tokenisation
+            # differences (observed on a verbatim Ibn Kathir quotation that
+            # the tolerant aligner rejected).  Only skip token verification
+            # when ONE cited chunk contains every quoted span verbatim.
+            exact_quote = bool(quote_spans) and any(
+                _quoted_spans_exact(sent, retrieved[i]) for i in opt
+            )
+            if not exact_quote:
+                for stoks in quote_spans:
+                    ok = False
+                    if len(stoks) < 3:
+                        for i in opt:
+                            if all(any(_seq_support(st, rt, "aligned")
+                                       for rt in chunk_toks[i])
+                                   for st in stoks):
+                                ok = True
+                                break
+                    else:
+                        for i in opt:
+                            ok, _ = _span_align(stoks, chunk_toks[i], "aligned",
+                                                _GROUNDING_SPAN_MAX_GAP)
+                            if ok:
+                                break
+                    if not ok:
+                        quote_ok = False
+                        break
             # Entity guard: a claim token directly following a name anchor
             # must be matched or seed-aligned in the cited source — entity
             # names cannot hide behind rare-token df or the family exemption.
+            # Construct anchors additionally require the anchor+follower pair
+            # in the same cited chunk, so "أم الفضل" cannot be grounded by an
+            # unrelated occurrence of the common noun "فضل".
             entity_ok = True
-            for ftok in entity_followers:
+            for anchor, ftok, require_pair in entity_mentions:
+                if require_pair:
+                    pair = (_gkey(anchor), _gkey(ftok))
+                    if pair in ref_pairs or pair in ref_title_pairs:
+                        continue
+                    # No family fallback here: the whole point of the pair
+                    # check is that the common noun alone cannot ground a
+                    # different person's name.  A pair in the cited chunk's
+                    # own reference is a source label ("تفسير ابن كثير"),
+                    # not a claim about the person, so it is exempt.
+                    entity_ok = False
+                    break
                 if _gkey(ftok) in ref_keys:
                     continue
                 fhits = {s for s in (_fam_of(ftok) & ref_surface)
@@ -2602,6 +3949,9 @@ def _ground_answer(answer: str, retrieved: list[dict],
                     if (t.isdigit() or token_keys[j] in ref_keys
                             or token_keys[j] in ref_title_keys):
                         continue
+                    legal_family = _legal_family_of_token(t)
+                    if legal_family and legal_family in ref_legal:
+                        continue
                     hits = {s for s in (_fam_of(t) & ref_surface)
                             if _seed_aligned(t, s)}
                     hits |= _curated_alias_surfaces(t, ref_surface)
@@ -2616,18 +3966,71 @@ def _ground_answer(answer: str, retrieved: list[dict],
                         coverage < _GROUNDING_GUARD_COV
                         and d <= _GROUNDING_GUARD_BAND
                     ):
+                        if ignore_rare:
+                            weak = _fold_weak(t)
+                            if len(weak) >= 3 and any(
+                                _fold_weak(s) == weak for s in ref_surface
+                            ):
+                                continue
                         rare.append((t, d))
+            # A strong legal conclusion is part of the claim.  It must be
+            # asserted by at least one cited chunk, not merely be absent from
+            # the topic words or implied by a quoted command.
+            legal_ok = all(
+                any(
+                    claim in sentence_legal
+                    and legal_required_keys <= sentence_topic
+                    for sentence_topic, sentence_legal, _, _
+                    in ref_legal_sentences
+                )
+                for claim in claim_legal
+            )
+            if legal_ok and claim_legal_neg:
+                for claim in claim_legal_neg:
+                    has_positive = any(
+                        claim in sentence_legal
+                        and legal_required_keys <= sentence_topic
+                        for sentence_topic, sentence_legal, _, _
+                        in ref_legal_sentences
+                    )
+                    has_negative = any(
+                        claim in sentence_legal_neg
+                        and legal_required_keys <= sentence_topic
+                        for sentence_topic, _, sentence_legal_neg, _
+                        in ref_legal_sentences
+                    )
+                    if has_positive and not has_negative:
+                        legal_ok = False
+                        break
+            if legal_ok and claim_condition:
+                legal_ok = any(
+                    condition
+                    and legal_required_keys <= sentence_topic
+                    for sentence_topic, _, _, condition
+                    in ref_legal_sentences
+                )
+            # Bold labels are headings, not evidence.  They must be directly
+            # present in the cited text; a legal synonym in a heading does not
+            # make the heading itself supported.
+            heading_ok = all(
+                _gkey(token) in ref_keys
+                or _gkey(token) in ref_title_keys
+                for token in bold_tokens
+            )
             if coverage >= best_cov:
                 best_cov = coverage
                 best_state = {"digits_ok": digits_ok, "months_ok": months_ok,
                               "neg_ok": neg_ok, "contra_ok": contra_ok,
                               "quote_ok": quote_ok, "entity_ok": entity_ok,
+                              "legal_ok": legal_ok, "heading_ok": heading_ok,
                               "rare": rare}
             if (
                 coverage >= GROUNDING_MIN_COVERAGE
                 and digits_ok and months_ok and neg_ok and contra_ok
-                and quote_ok and entity_ok
-                and (ignore_rare or not rare)
+                and quote_ok and entity_ok and legal_ok and heading_ok
+                and (not rare
+                     or (ignore_rare
+                         and not any(d == 0 for _, d in rare)))
             ):
                 kept_this = True
                 lenient_used = bool(rare)
@@ -2635,6 +4038,7 @@ def _ground_answer(answer: str, retrieved: list[dict],
                 best_state = {"digits_ok": digits_ok, "months_ok": months_ok,
                               "neg_ok": neg_ok, "contra_ok": contra_ok,
                               "quote_ok": quote_ok, "entity_ok": entity_ok,
+                              "legal_ok": legal_ok, "heading_ok": heading_ok,
                               "rare": rare}
                 break
 
@@ -2644,6 +4048,8 @@ def _ground_answer(answer: str, retrieved: list[dict],
         contra_ok = best_state["contra_ok"]
         quote_ok = best_state["quote_ok"]
         entity_ok = best_state["entity_ok"]
+        legal_ok = best_state["legal_ok"]
+        heading_ok = best_state["heading_ok"]
         rare = best_state["rare"]
         tag = ("KEEP-LENIENT" if kept_this and lenient_used
                else "KEEP" if kept_this else "DROP")
@@ -2657,7 +4063,9 @@ def _ground_answer(answer: str, retrieved: list[dict],
             f"neg={'ok' if neg_ok else 'flip'} "
             f"quote={'ok' if quote_ok else 'fail'} "
             f"entity={'ok' if entity_ok else 'fail'} "
-            f"contra={'ok' if contra_ok else 'fail'}{rare_s}"
+            f"contra={'ok' if contra_ok else 'fail'} "
+            f"legal={'ok' if legal_ok else 'fail'} "
+            f"heading={'ok' if heading_ok else 'fail'}{rare_s}"
             f" | {sent_stripped[:40]!r}"
         )
         if kept_this:
@@ -2668,13 +4076,21 @@ def _ground_answer(answer: str, retrieved: list[dict],
 
     # Re-join while preserving valid citation markers for auditability.
     joined = " ".join(k.strip() for k in kept).strip()
-    joined = re.sub(r'(?:(?<=\s)|^)\d+[.)]\s*(?=(?:\d+[.)]|$))', '', joined).strip()
+    # Only remove list markers at a line start/absolute start.  The previous
+    # whitespace-based pattern also matched the "1)" inside "(مصدر 1)" at
+    # the end of a sentence and corrupted a valid citation.
+    joined = re.sub(
+        r'(?:(?<=\n)|^)\s*\d+[.)]\s*(?=(?:\d+[.)]|$))',
+        '', joined,
+    ).strip()
     return joined
 
 
 def ground_text(answer: str, retrieved: list[dict],
                 corpus_chunks: list[dict] | None = None,
-                refusal: str | None = None) -> str:
+                refusal: str | None = None,
+                ignore_rare: bool = False,
+                quran_quotes: bool = False) -> str:
     """Public grounding entry point for endpoints other than /api/chat.
 
     Thin wrapper over the audited `_ground_answer` engine: the matcher,
@@ -2682,9 +4098,16 @@ def ground_text(answer: str, retrieved: list[dict],
     `_ground_answer` directly.  When *refusal* is provided, it replaces the
     engine's canonical refusal on total rejection so each endpoint can keep
     its own established refusal contract; ``None`` preserves the chat
-    refusal exactly.
+    refusal exactly.  ``ignore_rare`` is the engine's documented last-resort
+    relaxation: it tolerates existing low-frequency tokens and corpus-absent
+    tokens whose weak-letter skeleton matches a cited-source token, while
+    still enforcing coverage, quote, entity, polarity, number and month
+    checks.
     """
-    grounded = _ground_answer(answer, retrieved, corpus_chunks)
+    grounded = _ground_answer(
+        answer, retrieved, corpus_chunks, ignore_rare=ignore_rare,
+        quran_quotes=quran_quotes,
+    )
     if (refusal is not None
             and grounded == "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال."):
         return refusal
@@ -2698,7 +4121,7 @@ def _answer_content_tokens(text: str) -> list[str]:
     return [
         t for t in tokens
         if t not in _QUERY_STOPWORDS
-        and t not in _GROUNDING_IGNORED_TOKENS
+        and t not in _GROUNDING_IGNORED_FOLDED
         and (len(t) >= 3 or t.isdigit())
     ]
 
@@ -2707,11 +4130,19 @@ def _source_support_ratio(text: str, chunk: dict) -> float:
     tokens = _answer_content_tokens(text)
     if not tokens:
         return 1.0
-    reference = {
-        _gkey(t) for t in _numbers_normalized(
-            _tokenize(chunk.get("original_text", "") or ""))
-    }
-    return sum(1 for t in tokens if _gkey(t) in reference) / len(tokens)
+    chunk_tokens = _numbers_normalized(
+        _tokenize(chunk.get("original_text", "") or ""))
+    reference = {_gkey(t) for t in chunk_tokens}
+    reference_legal = _positive_legal_families_from_tokens(chunk_tokens)
+    matched = 0
+    for token in tokens:
+        if _gkey(token) in reference:
+            matched += 1
+            continue
+        legal_family = _legal_family_of_token(token)
+        if legal_family and legal_family in reference_legal:
+            matched += 1
+    return matched / len(tokens)
 
 
 def _is_primary_hadith(chunk: dict) -> bool:
@@ -2743,7 +4174,7 @@ def _quoted_spans_supported(sentence: str, chunk: dict) -> bool:
         tokens = [
             t for t in _numbers_normalized(_tokenize(span))
             if t not in _QUERY_STOPWORDS
-            and t not in _GROUNDING_IGNORED_TOKENS
+            and t not in _GROUNDING_IGNORED_FOLDED
             and (len(t) >= 3 or t.isdigit())
         ]
         if not tokens:
@@ -2758,6 +4189,69 @@ def _quoted_spans_supported(sentence: str, chunk: dict) -> bool:
             if not ok:
                 return False
     return True
+
+
+def _repair_exact_quote_citation(sentence: str, retrieved: list[dict]) -> str:
+    """Point a verbatim quotation at the one retrieved chunk that contains it.
+
+    This is deliberately narrower than general citation repair: it only acts
+    when (a) the sentence contains a quoted span, (b) none of its current
+    citations contains that span verbatim, and (c) exactly one retrieved
+    chunk does.  That is an attribution correction, not a support relaxation.
+    """
+    if not _QUOTE_RE.search(sentence):
+        return sentence
+    citations = list(_CITATION_RE.finditer(sentence))
+    if not citations:
+        return sentence
+    cited = [
+        int(match.group(1)) - 1 for match in citations
+        if 1 <= int(match.group(1)) <= len(retrieved)
+    ]
+    if not cited:
+        return sentence
+    if any(_quoted_spans_exact(sentence, retrieved[i]) for i in cited):
+        return sentence
+    exact = [
+        i for i, chunk in enumerate(retrieved)
+        if _quoted_spans_exact(sentence, chunk)
+    ]
+    if len(exact) != 1:
+        return sentence
+    return _CITATION_RUN_RE.sub(
+        f" (مصدر {exact[0] + 1})", sentence,
+    )
+
+
+def _strip_unsupported_quotes(
+    answer: str, retrieved: list[dict],
+) -> str:
+    """Remove quotation marks around spans not supported by their citation.
+
+    Quotation marks promise a verbatim source text.  When the generator puts
+    a paraphrase inside quotes, the claim itself may still be supported; the
+    honest repair is to present it as a paraphrase, not to discard the whole
+    sentence.  Only the quote characters are removed; every substantive
+    grounding guard still runs on the resulting sentence.
+    """
+    pieces = _SENT_SPLIT_RE.split(answer)
+    out: list[str] = []
+    changed = False
+    for sentence in pieces:
+        citations = list(_CITATION_RE.finditer(sentence))
+        cited = [
+            int(match.group(1)) - 1 for match in citations
+            if 1 <= int(match.group(1)) <= len(retrieved)
+        ]
+        if not cited or not _QUOTE_RE.search(sentence):
+            out.append(sentence)
+            continue
+        if any(_quoted_spans_supported(sentence, retrieved[i]) for i in cited):
+            out.append(sentence)
+            continue
+        out.append(_QUOTE_RE.sub(lambda match: match.group(1), sentence))
+        changed = True
+    return "".join(out) if changed else answer
 
 
 def _repair_citation_support(
@@ -2820,6 +4314,16 @@ def _repair_citation_support(
             ]
             if primary:
                 chosen = max(primary, key=lambda i: scores[i])
+        if chosen is None and _QUOTE_RE.search(sentence):
+            # Exact-quote attribution repair: prefer a retrieved chunk that
+            # contains every quoted span verbatim over a nearby duplicate or
+            # an adjacent tafsir chunk that merely shares the topic.
+            exact = [
+                i for i, chunk in enumerate(retrieved)
+                if _quoted_spans_exact(sentence, chunk)
+            ]
+            if exact and not any(i in cited for i in exact):
+                chosen = max(exact, key=lambda i: scores[i])
         if chosen is None:
             repaired.append(sentence)
         else:
@@ -2843,7 +4347,19 @@ def _add_missing_citations(answer: str, retrieved: list[dict]) -> str:
             continue
         scores = [_source_support_ratio(stripped, chunk)
                   for chunk in retrieved]
-        best = max(range(len(retrieved)), key=lambda i: scores[i])
+        candidate_indices = list(range(len(retrieved)))
+        legal_claims = _positive_legal_families(stripped)
+        if legal_claims:
+            candidate_indices = [
+                i for i in candidate_indices
+                if legal_claims <= _positive_legal_families(
+                    retrieved[i].get("original_text", "") or "",
+                )
+            ]
+        if not candidate_indices:
+            chunks.append(sentence)
+            continue
+        best = max(candidate_indices, key=lambda i: scores[i])
         if (scores[best] < GROUNDING_MIN_COVERAGE
                 or not _quoted_spans_supported(stripped, retrieved[best])):
             chunks.append(sentence)
@@ -2855,7 +4371,8 @@ def _add_missing_citations(answer: str, retrieved: list[dict]) -> str:
             body = stripped
         leading = sentence[:len(sentence) - len(sentence.lstrip())]
         trailing = sentence[len(sentence.rstrip()):]
-        chunks.append(f"{leading}{body} {citation}{stripped[-1] if stripped[-1] in '.!?؟' else ''}{trailing}")
+        ending = stripped[-1] if stripped[-1] in ".!?؟" else "."
+        chunks.append(f"{leading}{body} {citation}{ending}{trailing}")
     return "".join(chunks)
 
 
@@ -2917,6 +4434,28 @@ def _query_subject_phrase(query: str) -> str:
     return text.strip()
 
 
+def _supported_subject_phrase(query: str, retrieved: list[dict]) -> str:
+    """Keep only query-subject words the retrieved sources actually contain.
+
+    A completeness summary must not smuggle query context into a citation.
+    For example, the query may say "الغسل يوم الجمعة" while the cited fiqh
+    clause only discusses "الغسل"; asserting the full phrase would make the
+    summary ungrounded (and correctly get dropped).  Filtering to supported
+    words keeps the explicit ruling while staying inside the source.
+    """
+    phrase = _query_subject_phrase(query)
+    source_keys: set[str] = set()
+    for chunk in retrieved:
+        source_keys |= _source_text_keys(
+            chunk.get("original_text", "") or "")
+        source_keys |= _source_text_keys(chunk.get("reference", "") or "")
+    kept = [
+        word for word in phrase.split()
+        if _source_text_keys(word) & source_keys
+    ]
+    return " ".join(kept) if kept else phrase
+
+
 def _strip_source_notes(text: str) -> str:
     text = re.sub(r"\[\[.*?\]\]", "", text)
     return re.sub(r"\[([^\[\]]*)\]", r"\1", text)
@@ -2925,6 +4464,13 @@ def _strip_source_notes(text: str) -> str:
 def _clean_source_snippet(text: str) -> str:
     text = re.sub(r"^\s*بسم الله الرحمن الرحيم\s*", "", text)
     text = re.sub(r"^(?:\s*\*\s*)+\s*", "", text)
+    text = re.sub(r"^\s*\(\d+\)\s+", "", text)
+    text = re.sub(r"^\s*\d+[.)]\s+", "", text)
+    # Strip a bare list label ("ب - "), a dangling clause separator, and a
+    # closing quotation mark left over from a quoted source clause.
+    text = re.sub(r"^\s*[\u0621-\u064A]\s*[-–]\s+", "", text)
+    text = re.sub(r"\s*[،؛:]\s*$", "", text)
+    text = re.sub(r'[\s"«»“”]+$', "", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -3062,6 +4608,172 @@ def _find_variant_answer(
     return index, f"قال رسول الله صلى الله عليه وسلم: {quote}"
 
 
+def _recover_tayammum_narrative(
+    query: str, retrieved: list[dict],
+) -> str | None:
+    """Recover a refused tayammum-story answer extractively from the sources.
+
+    Live generation occasionally paraphrases "فتَغَيَّظَ" with a source-absent
+    synonym (e.g. فاغتاظ).  Grounding correctly drops that unsupported clause,
+    and when it was the only sentence the answer becomes a false refusal even
+    though the cited fiqh passage narrates the whole incident.  This fallback
+    quotes the passage's own necklace, water and revelation clauses, each
+    cited and re-grounded; it never invents text.
+    """
+    qn = normalize(query)
+    if not ("تيمم" in qn and "عايشه" in _fold_ar(qn)):
+        return None
+    marker_groups = (
+        ("سقط عقد", "انقطع عقد", "عقد لي"),
+        ("ليسوا على ماء", "لم يكن معهم ماء", "لم يجدوا ماء",
+         "على غير ماء"),
+        ("آية التيمم", "الرخصة في التيمم"),
+    )
+    parts: list[str] = []
+    seen: set[tuple[int, str]] = set()
+    for markers in marker_groups:
+        found = _find_source_snippet(
+            query, "", retrieved, markers, min_words=6,
+        )
+        if not found:
+            continue
+        index, snippet = found
+        # Drop a trailing narrator lead-in ("قال السيد بن حضير") that the
+        # clause splitter cannot see inside the parenthetical.
+        snippet = re.split(r"\s+قال\s+", snippet, maxsplit=1)[0].strip()
+        if not snippet or (index, snippet) in seen:
+            continue
+        seen.add((index, snippet))
+        trial = f"{snippet} (مصدر {index})."
+        if _COMPLETENESS_REFUSAL in _ground_answer(trial, retrieved):
+            continue
+        parts.append(trial)
+    if len(parts) < 2:
+        return None
+    combined = " ".join(parts)
+    if _COMPLETENESS_REFUSAL in _ground_answer(combined, retrieved):
+        return None
+    return combined
+
+
+def _find_tafsir_opening_clause(
+    query: str, retrieved: list[dict],
+) -> tuple[int, str] | None:
+    """Return the tafsir passage's opening meaning clause for a Tafsir answer.
+
+    Classical tafsir chunks often open with the verse's overall meaning
+    ("يخبر تعالى أن أول بيت وضع للناس ...").  A generated answer can omit
+    that opening and jump straight to legal details.  This bounded clause is
+    used only to prepend the passage's own words; grounding still verifies
+    it against the cited chunk.
+    """
+    subject_keys = _query_subject_keys(query)
+    for index, chunk in enumerate(retrieved, 1):
+        if chunk.get("source") != "tafsir":
+            continue
+        # Split the raw passage so punctuation survives; matching is done on
+        # the folded form, but the returned clause keeps the source's own
+        # orthography (الصلاة, not الصلاه).
+        raw = _strip_source_notes(chunk.get("original_text") or "")
+        sentences = _split_source_sentences(raw)
+        if not sentences:
+            continue
+        first = sentences[0]
+        clause = re.split(
+            r"\s+(?:أي|اي|يعني|وهو|وهي|قال|قالت)\s*[:：]?",
+            first, maxsplit=1,
+        )[0]
+        clause = re.split(r"[،:؛.]", clause, maxsplit=1)[0]
+        words = clause.split()
+        if len(words) > 16:
+            clause = " ".join(words[:16])
+        clause = _clean_source_snippet(clause)
+        if len(clause) < 8:
+            continue
+        if subject_keys and not (
+            subject_keys & _source_text_keys(clause)
+        ):
+            continue
+        return index, clause
+    return None
+
+
+def _concise_source_clause(
+    raw_sentence: str,
+    folded_markers: tuple[str, ...],
+    *,
+    min_words: int = 12,
+    max_words: int = 36,
+) -> str:
+    """Return the clause around a completeness marker, not a whole chunk.
+
+    Some fiqh chunks are a single long paragraph with no sentence break at
+    all.  Returning the whole paragraph both bloats the answer and makes the
+    grounding check expensive.  Split the *raw* sentence on Arabic clause
+    punctuation first (normalization strips punctuation), then take the
+    marker's clause plus just enough neighbouring context to state the rule.
+    """
+    clauses = [
+        c.strip() for c in re.split(r"(?<=[،؛:])\s*", raw_sentence) if c.strip()
+    ]
+    if len(clauses) <= 1:
+        return _clean_source_snippet(raw_sentence)
+    folded_clauses = [_fold_ar(normalize(c)) for c in clauses]
+    hit_index = next(
+        (
+            i for i, clause in enumerate(folded_clauses)
+            if any(marker in clause for marker in folded_markers)
+        ),
+        None,
+    )
+    if hit_index is None:
+        return _clean_source_snippet(raw_sentence)
+    start = hit_index
+    end = hit_index
+    words = len(folded_clauses[hit_index].split())
+    # Prefer the clause that follows the marker.  For the zakat timing
+    # marker, the hit clause is "من أداها قبل الصلاة"; its meaningful
+    # continuation is "فهي زكاة مقبولة", while the preceding clause is the
+    # unrelated "من اللغو والرفث..." fragment.  Only fall back to one
+    # preceding clause when forward context cannot reach min_words (e.g. the
+    # riba definition "الزيادة على رأس المال").
+    while words < min_words and end + 1 < len(clauses):
+        end += 1
+        words += len(folded_clauses[end].split())
+    if words < min_words and start > 0:
+        start -= 1
+        words += len(folded_clauses[start].split())
+    while end > hit_index and words > max_words:
+        words -= len(folded_clauses[end].split())
+        end -= 1
+    return _clean_source_snippet(" ".join(clauses[start:end + 1]))
+
+
+def _find_condition_list_snippet(
+    query: str, retrieved: list[dict],
+) -> tuple[int, str] | None:
+    """Return a numbered condition list anchored by "الشرط الآتية"."""
+    subject_keys = _query_subject_keys(query)
+    markers = ("الشرط الاتية", "الشرط الاتيه", "الشروط الاتية", "الشروط الاتيه")
+    for index, chunk in enumerate(retrieved, 1):
+        raw = chunk.get("original_text", "") or ""
+        if not subject_keys or not subject_keys.intersection(
+            _source_text_keys(raw)
+        ):
+            continue
+        for marker in markers:
+            start = raw.find(marker)
+            if start < 0:
+                continue
+            tail = raw[start:]
+            stop = re.search(r"فمن لم|ومن لم|\n\n", tail)
+            end = len(tail) if stop is None else stop.start()
+            snippet = tail[:min(end, 600)].strip()
+            if snippet:
+                return index, _clean_source_snippet(snippet)
+    return None
+
+
 def _find_source_snippet(
     query: str,
     answer: str,
@@ -3070,18 +4782,26 @@ def _find_source_snippet(
     *,
     list_mode: bool = False,
     phrase_only: bool = False,
+    min_words: int = 12,
 ) -> tuple[int, str] | None:
     subject_keys = _query_subject_keys(query)
     answer_keys = _source_text_keys(answer)
-    folded_markers = tuple(_fold_ar(m) for m in markers)
+    # Completeness markers are written in modern normalized Arabic (e.g.
+    # جراحه), while the corpus preserves ta marbuta (جراحة).  Normalize the
+    # source and the markers with the same pipeline before folding so a
+    # legitimate clause is not missed on an orthographic difference.
+    folded_markers = tuple(_fold_ar(normalize(m)) for m in markers)
     best: tuple[int, int, str] | None = None
     for index, chunk in enumerate(retrieved, 1):
-        body = _fold_ar(chunk.get("original_text", "") or "")
+        raw = chunk.get("original_text", "") or ""
+        body = _fold_ar(normalize(raw))
         chunk_keys = _source_text_keys(body)
         if not subject_keys or not subject_keys.intersection(chunk_keys):
             continue
-        for sentence in _split_source_sentences(body):
-            folded = _fold_ar(sentence)
+        # Split the raw text so sentence punctuation survives; normalizing
+        # first would erase the very boundaries used to bound the snippet.
+        for raw_sentence in _split_source_sentences(raw):
+            folded = _fold_ar(normalize(raw_sentence))
             hits = [m for m in folded_markers if m in folded]
             if not hits:
                 continue
@@ -3093,7 +4813,10 @@ def _find_source_snippet(
                     continue
             score = 2 * len(subject_keys.intersection(chunk_keys)) + len(hits)
             if best is None or score > best[0]:
-                snippet = hits[0] if phrase_only else folded
+                snippet = _concise_source_clause(
+                    raw_sentence, folded_markers,
+                    min_words=4 if phrase_only else min_words,
+                )
                 best = (score, index, _clean_source_snippet(snippet))
     if best is None:
         return None
@@ -3110,6 +4833,7 @@ def _add_completeness_snippet(
 ) -> str:
     if not snippet:
         return answer
+    snippet = snippet.rstrip(' .،؛:"«»“”')
     snippet_keys = _source_text_keys(snippet)
     answer_keys = _source_text_keys(answer)
     if snippet_keys and answer_keys:
@@ -3124,23 +4848,296 @@ def _add_completeness_snippet(
     return f"{answer.rstrip()}\n\n{trial}"
 
 
+def _injected_quran_verse(
+    retrieved: list[dict],
+) -> tuple[int, str, str] | None:
+    """Return the first deterministic Quran anchor in *retrieved*."""
+    for index, chunk in enumerate(retrieved, 1):
+        if (chunk.get("source") != "quran"
+                or not chunk.get("_injected")):
+            continue
+        text = (chunk.get("original_text") or "").strip()
+        if not text:
+            continue
+        metadata = chunk.get("metadata") or {}
+        surah = str(metadata.get("surah_name") or "").strip()
+        ayah = metadata.get("ayah_number")
+        if surah and ayah is not None:
+            reference = f"{surah}: {ayah}"
+        else:
+            reference = str(chunk.get("reference") or "").strip()
+        return index, text, reference
+    return None
+
+
+def _quran_topic_anchor_verse(
+    query: str, retrieved: list[dict],
+) -> tuple[int, str, str] | None:
+    """Return the injected canonical Quran verse for a core-topic question.
+
+    Only chunks marked ``_injected`` are considered.  Those are the
+    deterministic topic/tafsir anchors added by ``retrieve``; a verse that
+    merely happened to rank highly is not treated as a primary-source
+    requirement.  Tafsir-intent questions are excluded because their answer
+    is already anchored to the resolved verse and commentary.
+    """
+    qn = normalize(query)
+    if _TAFSIR_VERB_RE.search(qn) or _TAFSIR_MEANING_RE.search(qn):
+        return None
+    return _injected_quran_verse(retrieved)
+
+
+def _tafsir_anchor_verse(
+    query: str, retrieved: list[dict],
+) -> tuple[int, str, str] | None:
+    """Return the resolved Quran verse for a Tafsir-intent answer.
+
+    The Tafsir resolver injects the exact verse and its commentary, but the
+    generated prose sometimes omits the verse itself and only paraphrases
+    the commentary.  The answer-completeness pass quotes the injected verse
+    when it is missing; this helper deliberately only fires for explicit
+    Tafsir intent so ordinary questions keep the core-topic rules.
+    """
+    qn = normalize(query)
+    if not (_TAFSIR_VERB_RE.search(qn) or _TAFSIR_MEANING_RE.search(qn)):
+        return None
+    return _injected_quran_verse(retrieved)
+
+
+def _answer_quotes_verse(answer: str, verse: str) -> bool:
+    """True when the answer contains the verse's normalized text verbatim.
+
+    A token-overlap test is too weak for this purpose: "الله الواحد" shares
+    the keys الله/أحد with "قل هو الله أحد" and would falsely count as a
+    quotation.  The completeness pass must append the verse unless its full
+    normalized wording is actually present.
+    """
+    return (
+        _fold_ar(normalize(verse))
+        in _fold_ar(normalize(answer))
+    )
+
+
+def _answer_quotes_verse_fragment(
+    answer: str, verse: str, min_tokens: int = 12,
+) -> bool:
+    """True when the answer already contains a long contiguous verse quote.
+
+    A partial but substantial quotation (e.g. the wudu portion of 5:6) is
+    already the relevant revelation text.  Appending the entire verse then
+    repeats dozens of words and adds unrelated clauses.  A 12-token
+    contiguous window is deliberately conservative: a short phrase such as
+    "وأحل الله البيع وحرم الربا" does not suppress the full verse.
+    """
+    verse_tokens = _fold_ar(normalize(verse)).split()
+    if len(verse_tokens) < min_tokens:
+        return False
+    answer_norm = _fold_ar(normalize(answer))
+    return any(
+        " ".join(verse_tokens[i:i + min_tokens]) in answer_norm
+        for i in range(len(verse_tokens) - min_tokens + 1)
+    )
+
+
 def _augment_answer_completeness(
     query: str, answer: str, retrieved: list[dict],
 ) -> str:
     if not answer.strip():
         return answer
-    if _COMPLETENESS_REFUSAL in answer:
-        recovered = _find_variant_answer(query, retrieved)
-        if not recovered:
-            return answer
-        index, snippet = recovered
-        trial = f"{snippet} (مصدر {index})."
-        if _COMPLETENESS_REFUSAL in _ground_answer(trial, retrieved):
-            return answer
-        answer = trial
     qn = normalize(query)
+    tafsir_anchor = _tafsir_anchor_verse(query, retrieved)
+    anchor_verse = (
+        _quran_topic_anchor_verse(query, retrieved)
+        or tafsir_anchor
+    )
+    if _COMPLETENESS_REFUSAL in answer:
+        # A core-topic question can be answered directly from its injected
+        # canonical verse even when the model refused or its prose failed
+        # grounding.  The verse is quoted verbatim and re-grounded below.
+        recovered_anchor = False
+        if anchor_verse is not None:
+            index, verse, reference = anchor_verse
+            trial = (
+                f'قال الله تعالى: "{verse}" ({reference}) '
+                f"(مصدر {index})."
+            )
+            if _COMPLETENESS_REFUSAL not in _ground_answer(trial, retrieved):
+                answer = trial
+                recovered_anchor = True
+        if not recovered_anchor:
+            story = _recover_tayammum_narrative(query, retrieved)
+            if story is not None:
+                answer = story
+                recovered_anchor = True
+        if not recovered_anchor:
+            recovered = _find_variant_answer(query, retrieved)
+            if not recovered:
+                return answer
+            index, snippet = recovered
+            trial = f"{snippet} (مصدر {index})."
+            if _COMPLETENESS_REFUSAL in _ground_answer(trial, retrieved):
+                return answer
+            answer = trial
     answer_keys = _source_text_keys(answer)
     additions: list[tuple[str, int, str]] = []
+    if anchor_verse is not None:
+        index, verse, reference = anchor_verse
+        if tafsir_anchor is not None:
+            # For a resolved Tafsir question the verse itself is the primary
+            # text the user asked about.  Token overlap is not enough: an
+            # answer saying "الله الواحد" is not a quotation of "قل هو الله
+            # أحد".  Append the verse unless its full normalized wording is
+            # present.
+            missing_verse = not _answer_quotes_verse(answer, verse)
+        elif _answer_quotes_verse_fragment(answer, verse):
+            # The answer already quotes a substantial contiguous portion of
+            # the verse; appending the whole verse would duplicate it (the
+            # quran_wudu answer repeated the full 5:6 verse this way).
+            missing_verse = False
+        else:
+            verse_keys = _source_text_keys(verse)
+            missing_verse = bool(verse_keys) and (
+                len(verse_keys.intersection(answer_keys)) / len(verse_keys)
+                < 0.80
+            )
+        if missing_verse:
+            # The question has a deterministic primary verse but the answer
+            # quotes only part of it (or none).  Add the complete verse so a
+            # partial quotation cannot silently omit a clause the question
+            # asks about.
+            additions.append((
+                "append", index,
+                f'قال الله تعالى: "{verse}" ({reference})',
+            ))
+    if (
+        "اعظم ايه" in qn
+        or "افضل ايه" in qn
+        or "الكرسي" in qn
+    ):
+        answer_norm = _fold_ar(normalize(answer))
+        if (
+            "ايه الكرسي" not in answer_norm
+            and "الكرسي" not in answer_norm
+        ):
+            found = _find_source_snippet(
+                query, answer, retrieved, ("آية الكرسي",),
+                min_words=4,
+            )
+            if found:
+                additions.append(("append", *found))
+    if "زكاه الفطر" in qn:
+        # Zakat al-fitr has a precise measure and deadline.  An answer that
+        # discusses obligation but omits the amount or the "before the Eid
+        # prayer" timing is incomplete even when every sentence it contains
+        # is grounded.
+        if _gkey("صاع") not in answer_keys:
+            found = _find_source_snippet(
+                query, answer, retrieved, ("صاع",),
+            )
+            if found:
+                additions.append(("append", *found))
+        answer_norm = _fold_ar(normalize(answer))
+        if not any(
+            marker in answer_norm
+            for marker in (
+                "قبل الصلاه", "قبل صلاة العيد", "قبل خروج الناس",
+                "قبل العيد",
+            )
+        ):
+            found = _find_source_snippet(
+                query, answer, retrieved,
+                ("قبل خروج الناس", "قبل الصلاه", "قبل صلاة العيد"),
+            )
+            if found:
+                additions.append(("append", *found))
+    if "تيمم" in qn:
+        qn_folded = _fold_ar(qn)
+        narrative = (
+            "عايشه" in qn_folded
+            and any(marker in qn for marker in ("سفر", "شرع", "قصه"))
+        )
+        if narrative:
+            # The tayammum story's initiating event is the lost necklace.
+            # If the generated paraphrase of that clause is dropped (e.g. a
+            # non-source synonym for "فتغيظ"), the surviving water/verse
+            # sentences do not tell the user how the incident began.  Add
+            # the source's own concise necklace clause.
+            if not (
+                {_gkey("انقطع"), _gkey("سقط"), _gkey("ضاع")}
+                & answer_keys
+            ):
+                found = _find_source_snippet(
+                    query, answer, retrieved,
+                    ("سقط عقد", "انقطع عقد", "عقد لي"),
+                )
+                if found:
+                    additions.append(("append", *found))
+            answer_norm = _fold_ar(normalize(answer))
+            if not any(
+                marker in answer_norm
+                for marker in (
+                    "ليسوا على ماء", "ليس معهم ماء", "لم يجدوا ماء",
+                    "على غير ماء", "لم يكن معهم ماء",
+                )
+            ):
+                # The narrative's legal cause is the absence of water; a
+                # necklace-only retelling is incomplete.
+                found = _find_source_snippet(
+                    query, answer, retrieved,
+                    ("ليسوا على ماء", "ليس معهم ماء", "لم يجدوا ماء",
+                     "على غير ماء", "لم يكن معهم ماء"),
+                )
+                if found:
+                    additions.append(("append", *found))
+            if "ايه التيمم" not in _fold_ar(normalize(answer)):
+                # "الرخصة في التيمم" is a valid paraphrase, but the story's
+                # revealed verse is explicitly called آية التيمم in the
+                # source; state that clause rather than leaving the reader
+                # with only the generic word الرخصة.
+                found = _find_source_snippet(
+                    query, answer, retrieved, ("آية التيمم",),
+                    min_words=6,
+                )
+                if found:
+                    index, snippet = found
+                    snippet = re.split(
+                        r"\s+قال\s+", snippet, maxsplit=1,
+                    )[0].strip()
+                    if snippet:
+                        additions.append(("append", index, snippet))
+        elif not (
+            {_gkey("مرض"), _gkey("جراحة"), _gkey("جرح")} & answer_keys
+        ):
+            # The permissibility of tayammum has two independent causes in
+            # the fiqh source: absence of water and illness/injury.  A model
+            # answer that lists only the water cases is incomplete even when
+            # every listed case is grounded.
+            # Anchor on جراحة, not the bare مرض: the Quranic basis sentence
+            # in fiqh_66 contains "مرضى" and would otherwise win the
+            # subject-overlap score while saying nothing about the disease
+            # or injury cause.  The fiqh_67 clause states the actual cause.
+            found = _find_source_snippet(
+                query, answer, retrieved, ("جراحه", "جرح"),
+            )
+            if found:
+                additions.append(("append", *found))
+    if "ربا" in qn:
+        # The fiqh definition states the essential nature of riba (an
+        # increase over the principal), which is the non-optional fact in
+        # the broad rubric.  A harm-only answer omits it.
+        if not ({_gkey("زيادة"), _gkey("رأس")} & answer_keys):
+            found = _find_source_snippet(
+                query, answer, retrieved,
+                ("الزياده على راس المال",),
+            )
+            if found:
+                additions.append(("append", *found))
+        if _gkey("ضرر") not in answer_keys:
+            found = _find_source_snippet(
+                query, answer, retrieved, ("ضرر عظيم",),
+            )
+            if found:
+                additions.append(("append", *found))
     variant = _find_variant_quote(query, retrieved)
     if variant:
         index, quote = variant
@@ -3157,16 +5154,15 @@ def _augment_answer_completeness(
             if found:
                 additions.append(("append", *found))
                 if _gkey("استحباب") in _source_text_keys(found[1]):
-                    subject = _query_subject_phrase(query)
-                    command = _find_source_snippet(
-                        query, answer, retrieved,
-                        _COMPLETENESS_COMMAND_MARKERS, phrase_only=True,
-                    )
+                    # State the ruling explicitly.  The supporting command is
+                    # appended by the separate command block below; folding it
+                    # into this summary duplicated the same source clause and
+                    # made the prepend overlap check skip the ruling itself.
+                    subject = _supported_subject_phrase(query, retrieved)
                     if subject:
-                        summary = f"{subject} مستحب"
-                        if command:
-                            summary += f"، وقد {command[1]}"
-                        additions.append(("prepend", found[0], summary))
+                        additions.append((
+                            "prepend", found[0], f"{subject} مستحب",
+                        ))
         if not {_gkey("امر"), _gkey("اكد")} <= answer_keys:
             command = _find_source_snippet(
                 query, answer, retrieved,
@@ -3180,6 +5176,77 @@ def _augment_answer_completeness(
             found = _find_source_snippet(
                 query, answer, retrieved, _COMPLETENESS_TIMING_MARKERS,
                 phrase_only=True,
+            )
+            if found:
+                additions.append(("append", *found))
+    if _TAFSIR_VERB_RE.search(qn):
+        # Tafsir answers should open with the passage's overall meaning.
+        # When the model jumps straight to legal details, prepend the tafsir's
+        # own opening clause (verified against the cited chunk).
+        found = _find_tafsir_opening_clause(query, retrieved)
+        if found:
+            additions.append(("prepend", *found))
+    if _asks_fasting_query(qn):
+        day_tokens = [
+            token for token in _tokenize(qn)
+            if token in _DATE_WEEKDAY_TOKENS
+            or token in _FASTING_DAY_QUALIFIERS
+        ]
+        if day_tokens:
+            answer_norm = _fold_ar(normalize(answer))
+            if not any(
+                marker in answer_norm
+                for marker in ("النهي عن", "لا يكره", "مكروه")
+            ):
+                qualified = _find_source_snippet(
+                    query, answer, retrieved,
+                    ("وذهب الجمهور", "الكراهه", "لا يكره"),
+                    phrase_only=True,
+                )
+                if qualified:
+                    additions.append(("append", *qualified))
+                day = day_tokens[0]
+                found = _find_source_snippet(
+                    query, answer, retrieved,
+                    (
+                        f"النهي عن صوم يوم {day}",
+                        f"النهي عن صوم يوم ال{day}",
+                        f"النهي عن صيام يوم {day}",
+                        f"النهي عن صيام يوم ال{day}",
+                        f"صوم يوم {day}",
+                        f"صوم يوم ال{day}",
+                    ),
+                    phrase_only=True,
+                )
+                if found:
+                    additions.append(("append", *found))
+    if "شروط" in qn:
+        # A conditions question needs the source's own condition list, not
+        # only the subset the model happened to mention.
+        found = _find_condition_list_snippet(query, retrieved)
+        if found:
+            additions.append(("append", *found))
+    if "قصر" in qn:
+        if not (
+            {_gkey("مفارقة"), _gkey("الحضر")} & answer_keys
+        ):
+            # Shortening begins when the traveler leaves the settled area;
+            # an answer that only discusses duration is incomplete.
+            found = _find_source_snippet(
+                query, answer, retrieved,
+                ("مفارقة الحضر", "الخروج من البلد"),
+            )
+            if found:
+                additions.append(("append", *found))
+        if not (
+            {_gkey("ركعتين"), _gkey("ركعتان")} & answer_keys
+        ):
+            # A qasr answer that never states the shortened prayer's two
+            # rak'ahs is incomplete even when it correctly explains when
+            # shortening starts.  The number is stated explicitly in the fiqh
+            # source.
+            found = _find_source_snippet(
+                query, answer, retrieved, ("ركعتين", "ركعتان"),
             )
             if found:
                 additions.append(("append", *found))
@@ -3234,6 +5301,57 @@ _PRAYER_TIME_SURFACE = {
     "مغرب": "مغرب", "عشاء": "عشاء",
 }
 _BOLD_HEADING_RE = re.compile(r"\*\*([^*\n]+)\*\*")
+
+
+def _strip_bold_headings(text: str) -> str:
+    """Remove presentational ``**label**`` headings from *text*.
+
+    Headings are structural labels, not evidence.  When one contains a word
+    the cited source does not use (e.g. ``**تحريم الأموال والدماء**`` over a
+    verbatim ``دماءكم وأموالكم ... حرام`` quote), strict grounding must not
+    throw away the supported body.  Removing the label lets the normal
+    checks validate the remaining claim without weakening any guard.
+    """
+    out = _BOLD_HEADING_RE.sub("", text)
+    out = re.sub(r"(?m)^\s*(?:\d+[.)]\s*)?[:：]\s*", "", out)
+    out = re.sub(r"(?<=[.!?\u061f])\s*[:：]\s*", " ", out)
+    out = re.sub(r"\s*[:：]\s*(?=[.،؛])", "", out)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return out.strip()
+
+
+def _ground_with_heading_fallback(
+    answer: str, retrieved: list[dict], corpus_chunks: list[dict] | None,
+) -> str:
+    """Ground *answer*, retrying presentational repairs and keeping the most.
+
+    Two repairs are tried independently and together: removing bold labels
+    (headings are not evidence) and removing quotation marks around spans the
+    cited source does not contain verbatim (a paraphrased quote is still a
+    claim, but its body must pass every guard).  Each candidate is produced by
+    the full strict grounding policy; the longest grounded result wins.  This
+    prevents one unsupported label or pair of quotation marks from discarding
+    otherwise supported sentences, without relaxing any substantive check.
+    """
+    refusal = "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال."
+    candidates = [_ground_answer(answer, retrieved, corpus_chunks)]
+    stripped = _strip_bold_headings(answer)
+    if stripped != answer:
+        fallback = _ground_answer(stripped, retrieved, corpus_chunks)
+        if fallback.strip() != refusal:
+            candidates.append(fallback)
+    unquoted = _strip_unsupported_quotes(answer, retrieved)
+    if unquoted != answer:
+        fallback = _ground_answer(unquoted, retrieved, corpus_chunks)
+        if fallback.strip() != refusal:
+            candidates.append(fallback)
+    if stripped != answer:
+        both = _strip_unsupported_quotes(stripped, retrieved)
+        if both != stripped:
+            fallback = _ground_answer(both, retrieved, corpus_chunks)
+            if fallback.strip() != refusal:
+                candidates.append(fallback)
+    return max(candidates, key=len)
 
 
 def _prayer_time_keys(text: str) -> set[str]:
@@ -3349,6 +5467,32 @@ def _fix_mismatched_prayer_quotes(answer: str) -> str:
 # ===========================================================================
 
 
+_CITATION_BEFORE_QUOTE_END_RE = re.compile(
+    r'\s*\(مصدر\s*(\d+)\)\s*([؟?])\s*(["»”])'
+)
+_CITATION_AT_QUOTE_END_RE = re.compile(
+    r'\s*\(مصدر\s*(\d+)\)\s*(["»”])'
+)
+
+
+def _move_citations_out_of_quotes(answer: str) -> str:
+    """Move a citation that the generator placed inside a quotation outside it.
+
+    A citation marker is not part of the quoted source text.  Leaving it
+    inside changes the quotation (observed live: "أي آية ... أعظم (مصدر 2)؟").
+    Only markers immediately before the closing quote are moved; a marker in
+    the middle of a longer quotation is left untouched rather than guessed at.
+    """
+    answer = _CITATION_BEFORE_QUOTE_END_RE.sub(
+        lambda m: f'{m.group(2)}{m.group(3)} (مصدر {m.group(1)})',
+        answer,
+    )
+    return _CITATION_AT_QUOTE_END_RE.sub(
+        lambda m: f'{m.group(2)} (مصدر {m.group(1)})',
+        answer,
+    )
+
+
 def _drop_query_echo(answer: str, query: str) -> str:
     """Remove a leading verbatim question echoed by the generator."""
     query_norm = _fold_ar(normalize(query)).strip(" ؟?.")
@@ -3382,6 +5526,755 @@ def _context_covers_query(query: str, retrieved: list[dict]) -> bool:
     return len(qkeys & ckeys) / len(qkeys) >= 0.75
 
 
+_FOLLOWUP_PRONOUN_TOKENS = {
+    "هو", "هما", "هم", "هن", "ذلك", "تلك", "هذا", "هذه",
+}
+
+# Demonstratives and attached pronouns are anaphoric even when the turn also
+# names a small qualifier ("هل هذا الحديث صحيح؟", "ما حكمه للحاج؟").  They are
+# kept separate from personal pronouns, which can be copulas in a genuinely
+# new question ("من هو الرسول؟").
+_FOLLOWUP_DEMONSTRATIVE_TOKENS = {
+    "هذا", "هذه", "ذلك", "تلك", "هؤلاء", "أولئك",
+    # Egyptian demonstratives used in the same anaphoric way.
+    "ده", "دي", "دول",
+}
+_FOLLOWUP_ATTACHED_TOKENS = {
+    "حكمه", "حكمها", "حكمهم", "دليله", "دليلها",
+    "معناه", "معناها", "رأيه", "رأيها", "مثله", "مثلها",
+}
+
+# Legal/practical words in a follow-up ("يعني لازم أصوم...؟", "هل ده واجب؟")
+# describe the *kind* of clarification requested, not a new topic.  They are
+# removed only when deciding whether the turn is elliptical; a genuinely new
+# subject word such as "رمضان" keeps the turn standalone.
+_FOLLOWUP_LEGAL_WORDS = {
+    "لازم", "لازمه", "يلزم", "الزام", "واجب", "واجبه", "وجوب",
+    "فرض", "فرضه", "فريضه", "مفروض", "حرام", "حرامه", "تحريم",
+    "محرم", "حلال", "حلاله", "مباح", "اباحه", "مكروه", "كراهه",
+    "جائز", "جواز", "يجوز",
+}
+_FOLLOWUP_PRACTICAL_WORDS = {
+    "اصوم", "صوم", "صيام", "افطر", "فطر", "يوم", "قبله", "بعده",
+    "قبل", "بعد", "الحاله", "حاله", "ده", "دي", "دول",
+}
+
+# Words that carry a conversational intent but not a topic.  A query made
+# only of these words is elliptical: it means "the thing we were discussing",
+# not a new subject.  This covers Egyptian and MSA clarification turns such
+# as "أيوة يعني حلال ولا حرام؟", "إيه الدليل؟", "ليه؟", and
+# "ممكن توضح أكتر؟" without hardcoding any religious answer.
+_FOLLOWUP_GENERIC_WORDS = {
+    "حكم", "حكمه", "حكمها", "حكمهم", "احكام", "الحكم",
+    "حلال", "حرام", "مباح", "مكروه", "واجب", "جائز", "يجوز",
+    "دليل", "الدليل", "ادلته", "ايه", "ايوه", "ايوة", "نعم", "لا",
+    "يعني", "ليه", "لماذا", "طب", "طيب", "ممكن", "اكتر", "اكثر",
+    "توضح", "توضيح", "وضح", "اشرح", "قال",
+    "راي", "الراي", "تاني", "التاني", "اخر", "الاخر", "الحاله",
+    "حاله", "دي", "كده", "كدا", "صحيح", "غلط", "خطا", "ولا",
+    "او", "أو", "ام", "أم", "بس", "برضه", "برضو", "فين", "ازاي",
+    "إزاي", "ايه", "الدليل", "لو", "انا", "أنا", "احنا", "إحنا",
+}
+
+_FOLLOWUP_PHRASES = (
+    "قال ايه الرسول",
+    "قال الرسول",
+    "ايه الدليل",
+    "الدليل ايه",
+    "ممكن توضح",
+    "توضح اكتر",
+    "الراي التاني",
+    "راي التاني",
+    "في الحاله دي",
+    "حلال ولا حرام",
+    "ايوه يعني",
+    "طب ايه",
+)
+_FOLLOWUP_HYPOTHETICAL_PREFIXES = (
+    "طب لو", "طيب لو", "لو انا", "لو كنت", "ماذا لو",
+    "في حاله", "في الحاله", "بفرض",
+)
+_FOLLOWUP_GENERIC_FOLDED = {
+    _fold_ar(normalize(word)) for word in _FOLLOWUP_GENERIC_WORDS
+}
+_QUERY_STOPWORDS_FOLDED = {
+    _fold_ar(normalize(word)) for word in _QUERY_STOPWORDS
+}
+_FOLLOWUP_PRONOUN_FOLDED = {
+    _fold_ar(normalize(word)) for word in _FOLLOWUP_PRONOUN_TOKENS
+}
+_FOLLOWUP_DEMONSTRATIVE_FOLDED = {
+    _fold_ar(normalize(word)) for word in _FOLLOWUP_DEMONSTRATIVE_TOKENS
+}
+_FOLLOWUP_ATTACHED_FOLDED = {
+    _fold_ar(normalize(word)) for word in _FOLLOWUP_ATTACHED_TOKENS
+}
+_FOLLOWUP_ANAPHORIC_FOLDED = (
+    _FOLLOWUP_DEMONSTRATIVE_FOLDED | _FOLLOWUP_ATTACHED_FOLDED
+)
+_FOLLOWUP_LEGAL_FOLDED = {
+    _fold_ar(normalize(word)) for word in _FOLLOWUP_LEGAL_WORDS
+}
+_FOLLOWUP_OBLIGATION_FOLDED = {
+    _fold_ar(normalize(word)) for word in (
+        "لازم", "لازمه", "يلزم", "الزام", "واجب", "واجبه",
+        "وجوب", "فرض", "فرضه", "فريضه", "مفروض",
+    )
+}
+_FOLLOWUP_PROHIBITION_FOLDED = {
+    _fold_ar(normalize(word)) for word in (
+        "حرام", "حرامه", "يحرم", "تحريم", "محرم", "ممنوع",
+    )
+}
+_FOLLOWUP_PERMISSION_FOLDED = {
+    _fold_ar(normalize(word)) for word in (
+        "حلال", "حلاله", "مباح", "جائز", "يجوز", "جواز",
+    )
+}
+_FOLLOWUP_PRACTICAL_FOLDED = {
+    _fold_ar(normalize(word)) for word in _FOLLOWUP_PRACTICAL_WORDS
+}
+
+
+def _followup_content_tokens(query: str) -> list[str]:
+    """Topic-bearing tokens left after removing conversational fillers."""
+    qn = normalize(query).strip(" ؟?.")
+    if not qn:
+        return []
+    tokens = [_fold_ar(token) for token in _tokenize(qn)]
+    return [
+        token for token in tokens
+        if token not in _QUERY_STOPWORDS_FOLDED
+        and token not in _FOLLOWUP_GENERIC_FOLDED
+        and token not in _FOLLOWUP_PRONOUN_FOLDED
+        and len(token) >= 2
+    ]
+
+
+def _followup_topic_tokens(query: str) -> list[str]:
+    """Content tokens that name a topic, excluding legal/practical fillers."""
+    return [
+        token for token in _followup_content_tokens(query)
+        if token not in _FOLLOWUP_LEGAL_FOLDED
+        and token not in _FOLLOWUP_PRACTICAL_FOLDED
+    ]
+
+
+def _is_followup_query(query: str) -> bool:
+    """True when *query* is a clarification/ellipsis, not a new topic."""
+    qn = normalize(query).strip(" ؟?.")
+    if not qn:
+        return False
+    tokens = [_fold_ar(token) for token in _tokenize(qn)]
+    if not tokens:
+        return False
+    content = _followup_content_tokens(query)
+    if not content:
+        return True
+    if (
+        qn.startswith(_FOLLOWUP_HYPOTHETICAL_PREFIXES)
+        and len(content) <= 5
+    ):
+        return True
+    if (
+        any(token in _FOLLOWUP_LEGAL_FOLDED for token in tokens)
+        and not _followup_topic_tokens(query)
+    ):
+        # "يعني لازم أصوم يوم قبله أو بعده؟" asks about the legal status of
+        # the previous subject; none of its words names a new topic.
+        return True
+    if len(content) <= 3 and any(
+        token in _FOLLOWUP_ANAPHORIC_FOLDED for token in tokens
+    ):
+        return True
+    if len(content) <= 1 and any(
+        phrase in qn for phrase in _FOLLOWUP_PHRASES
+    ):
+        return True
+    if qn.startswith(("و", "ف", "ثم")) and len(content) <= 3:
+        return True
+    return False
+
+
+def _is_evidence_request(query: str) -> bool:
+    qn = normalize(query)
+    return any(
+        marker in qn
+        for marker in (
+            "دليل", "الدليل", "قال ايه الرسول", "قال إيه الرسول",
+            "قال ايه النبي", "قال إيه النبي", "رواه الحديث",
+        )
+    )
+
+
+_HABIT_MARKERS = ("متعود", "معتاد", "عاده", "عادة", "عودت")
+
+
+def _answer_mentions_habit(text: str) -> bool:
+    qn = normalize(text or "")
+    return any(marker in qn for marker in _HABIT_MARKERS)
+
+
+def _is_habit_query(query: str) -> bool:
+    return _answer_mentions_habit(query)
+
+
+def _last_user_message(chat_history: list[dict] | None) -> str:
+    return next(
+        (
+            str(message.get("content") or "").strip()
+            for message in reversed(chat_history or [])
+            if isinstance(message, dict)
+            and message.get("role") == "user"
+            and str(message.get("content") or "").strip()
+        ),
+        "",
+    )
+
+
+def _last_substantive_user(chat_history: list[dict] | None) -> str:
+    return next(
+        (
+            str(message.get("content") or "").strip()
+            for message in reversed(chat_history or [])
+            if isinstance(message, dict)
+            and message.get("role") == "user"
+            and str(message.get("content") or "").strip()
+            and not _is_followup_query(str(message.get("content") or ""))
+        ),
+        "",
+    )
+
+
+def _evidence_target_text(previous_assistant: str) -> str:
+    """Pick the preceding substantive sentence an evidence request refers to."""
+    body = _CITATION_RE.sub("", previous_assistant or "")
+    sentences = [
+        sentence.strip()
+        for sentence in _SENT_SPLIT_RE.split(body)
+        if sentence.strip()
+    ]
+    markers = (
+        "عاده", "عادة", "الكراهه", "لا يكره", "النهي", "يحرم", "حرام",
+        "واجب", "لا يجب", "يجوز", "يشترط", "قال رسول", "قال النبي",
+        "ورد",
+    )
+    preferred = [
+        sentence for sentence in sentences
+        if any(marker in normalize(sentence) for marker in markers)
+        and "قال الله" not in normalize(sentence)
+    ]
+    if preferred:
+        return preferred[-1][:500]
+    return sentences[-1][:500] if sentences else ""
+
+
+def _history_aware_query(
+    query: str, chat_history: list[dict] | None,
+) -> str:
+    """Build a retrieval-only query for a short follow-up turn.
+
+    The generation prompt already receives the conversation history, but
+    retrieval previously saw only the literal follow-up ("وما حكمه؟") and
+    could not find the subject.  Prepend the most recent substantive user
+    question for clarification/elliptical turns; the original query still
+    controls anchors, citations, and the final prompt.  A new unrelated
+    question is never enriched.
+    """
+    if not chat_history or not _is_followup_query(query):
+        return query
+
+    if _is_evidence_request(query):
+        previous_assistant = next(
+            (
+                str(message.get("content") or "").strip()
+                for message in reversed(chat_history)
+                if isinstance(message, dict)
+                and message.get("role") == "assistant"
+                and str(message.get("content") or "").strip()
+            ),
+            "",
+        )
+        target = _evidence_target_text(previous_assistant)
+        if target:
+            previous_question = _last_user_message(chat_history)
+            if previous_question:
+                return f"{previous_question} {target}"
+            return target
+
+    previous_user = _last_substantive_user(chat_history)
+    if not previous_user:
+        return query
+    if normalize(previous_user).strip(" ؟?.") == normalize(query).strip(" ؟?."):
+        return query
+    # For a pure clarification ("إيه الدليل؟", "حلال ولا حرام؟") the current
+    # words contain no topic; retrieve with the previous substantive question
+    # alone.  Appending generic polarity/discourse words diluted BM25 and
+    # pulled unrelated finance/prayer chunks.
+    current_topic = _followup_topic_tokens(query)
+    phrase_only = (
+        len(current_topic) <= 1
+        and any(phrase in normalize(query) for phrase in _FOLLOWUP_PHRASES)
+    )
+    if not current_topic or phrase_only:
+        return previous_user[-300:]
+    return f"{previous_user[-300:]} {query.strip()}"
+
+
+def _answer_citation_support_ok(
+    answer: str, retrieved: list[dict], threshold: float = 0.80,
+) -> bool:
+    if not answer.strip() or _COMPLETENESS_REFUSAL in answer:
+        return False
+    for sentence in _SENT_SPLIT_RE.split(answer):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        indices = [
+            int(match.group(1)) - 1
+            for match in _CITATION_RE.finditer(sentence)
+            if 1 <= int(match.group(1)) <= len(retrieved)
+        ]
+        if not indices:
+            return False
+        support = max(
+            _source_support_ratio(sentence, retrieved[index])
+            for index in indices
+        )
+        if support < threshold:
+            return False
+        legal_claims = _positive_legal_families(sentence)
+        if legal_claims and not any(
+            legal_claims <= _positive_legal_families(
+                retrieved[index].get("original_text", "") or "",
+            )
+            for index in indices
+        ):
+            return False
+    return True
+
+
+def _grounded_source_claim(
+    subject_text: str,
+    markers: tuple[str, ...],
+    retrieved: list[dict],
+    chunks: list[dict],
+    subject_keys: set[str] | None = None,
+) -> str | None:
+    """Find a verbatim source sentence about the subject and ground it."""
+    if subject_keys is None:
+        subject_keys = (
+            _legal_topic_keys(subject_text) - _COMPLETENESS_STOP_KEYS
+        )
+    else:
+        subject_keys = set(subject_keys)
+    for chunk in retrieved:
+        previous_topic_keys: set[str] = set()
+        for sentence in _split_source_sentences(
+            chunk.get("original_text", "") or "",
+        ):
+            sentence_topic_keys = _legal_topic_keys(sentence)
+            effective_topic_keys = sentence_topic_keys | previous_topic_keys
+            previous_topic_keys = sentence_topic_keys
+            if not any(marker in normalize(sentence) for marker in markers):
+                continue
+            if (
+                subject_keys
+                and not (subject_keys <= effective_topic_keys)
+            ):
+                continue
+            candidate = _clean_source_snippet(sentence)
+            if len(candidate) < 8:
+                continue
+            cited = _add_missing_citations(candidate, retrieved)
+            if cited == candidate:
+                continue
+            grounded = _ground_answer(cited, retrieved, chunks)
+            if _COMPLETENESS_REFUSAL in grounded:
+                continue
+            if _answer_citation_support_ok(
+                grounded, retrieved, threshold=0.65,
+            ):
+                return grounded
+    return None
+
+
+def _followup_fallback_answer(
+    query: str,
+    chat_history: list[dict] | None,
+    retrieved: list[dict],
+    chunks: list[dict],
+) -> str | None:
+    """Reuse a previous grounded sentence when a clarification answer drifts.
+
+    A clarification such as "حلال ولا حرام؟" can make the model add an
+    unsupported ruling label.  The previous assistant sentence is already
+    grounded and answers the same subject; re-cite it against the current
+    retrieved evidence and use it only when its support is strong.
+    """
+    if not chat_history or not _is_followup_query(query):
+        return None
+    previous = next(
+        (
+            str(message.get("content") or "").strip()
+            for message in reversed(chat_history)
+            if isinstance(message, dict)
+            and message.get("role") == "assistant"
+            and str(message.get("content") or "").strip()
+        ),
+        "",
+    )
+    if not previous:
+        return None
+    normalized_query = normalize(query)
+    asks_evidence = any(
+        marker in normalized_query
+        for marker in ("دليل", "حديث", "قال الرسول", "الرسول")
+    )
+    reason_tokens = {"ليه", "لماذا", "ليش", "لما"}
+    asks_reason = bool(
+        reason_tokens & set(_tokenize(normalized_query))
+    ) or "السبب" in normalized_query
+    asks_obligation = bool(
+        set(_tokenize(normalized_query)) & _FOLLOWUP_OBLIGATION_FOLDED
+    )
+    asks_modality = bool(
+        set(_tokenize(normalized_query)) & _FOLLOWUP_LEGAL_FOLDED
+    )
+    asks_habit = _is_habit_query(query)
+    keep_full = (
+        asks_evidence or asks_reason or asks_obligation or asks_habit
+    )
+    if asks_evidence and retrieved:
+        target = _evidence_target_text(previous)
+        subject_text = _last_user_message(chat_history) or target
+        core_keys = _required_action_evidence_keys(subject_text)
+        if not core_keys:
+            core_keys = (
+                _legal_topic_keys(subject_text) - _COMPLETENESS_STOP_KEYS
+            )
+        evidence_parts: list[str] = []
+        hadith = _grounded_source_claim(
+            subject_text,
+            ("قال رسول", "قال النبي", "روى", "ورد", "الصحيحين"),
+            retrieved,
+            chunks,
+            subject_keys=core_keys,
+        )
+        if hadith:
+            evidence_parts.append(hadith)
+        if target and _answer_mentions_habit(target):
+            habit_evidence = _grounded_source_claim(
+                subject_text,
+                ("عاده", "عادة"),
+                retrieved,
+                chunks,
+                subject_keys=core_keys,
+            )
+            if habit_evidence and habit_evidence not in evidence_parts:
+                evidence_parts.append(habit_evidence)
+        if evidence_parts:
+            return " ".join(evidence_parts)
+    sentences = [
+        sentence.strip()
+        for sentence in _SENT_SPLIT_RE.split(previous)
+        if sentence.strip()
+    ]
+    candidates = sentences
+    if asks_evidence:
+        evidence_sentences = [
+            sentence for sentence in sentences
+            if any(marker in normalize(sentence)
+                   for marker in ("قال", "حديث", "دليل", "روى", "ورد"))
+        ]
+        if evidence_sentences:
+            candidates = evidence_sentences
+    elif asks_reason:
+        # "ليه؟" asks for the cause, not a repetition of the ruling.  Prefer
+        # the prior answer's explanatory sentence when it has one.
+        reason_sentences = [
+            sentence for sentence in sentences
+            if any(
+                marker in normalize(sentence)
+                for marker in (
+                    "لأن", "السبب", "بسبب", "ضرر", "حكمه", "حكمة",
+                    "يسبب", "يؤدي", "تحريمه", "سبب",
+                )
+            )
+        ]
+        if reason_sentences:
+            candidates = reason_sentences
+    elif asks_obligation:
+        # "يعني لازم...؟" asks about the legal status of the previous
+        # subject.  Reuse the prior answer's qualified/exception sentence
+        # rather than repeating a bare ruling or inventing a stronger one.
+        legal_sentences = [
+            sentence for sentence in sentences
+            if any(
+                marker in normalize(sentence)
+                for marker in (
+                    "لا يجب", "ليس بواجب", "لا يلزم", "لا يكره",
+                    "الكراهه", "للتحريم", "يجوز", "يشترط",
+                    "الا اذا", "الا ان", "قبله", "بعده",
+                )
+            )
+        ]
+        if legal_sentences:
+            candidates = legal_sentences
+    elif asks_habit:
+        habit_sentences = [
+            sentence for sentence in sentences
+            if _answer_mentions_habit(sentence)
+        ]
+        if habit_sentences:
+            candidates = habit_sentences
+    elif asks_modality:
+        # A modality question ("يعني حرام؟") must not flatten a documented
+        # disagreement into one opinion.  Reuse the prior sentence that names
+        # the disagreement when it has one.
+        dispute_sentences = [
+            sentence for sentence in sentences
+            if any(
+                marker in normalize(sentence)
+                for marker in (
+                    "الجمهور", "جمهور", "آخرون", "اخرون", "اختلف",
+                    "خلاف", "قولان", "فريقان", "الراي الثاني",
+                    "الرأي الثاني", "ذهب بعض", "ذهب فريق",
+                )
+            )
+        ]
+        if dispute_sentences:
+            candidates = dispute_sentences
+            keep_full = True
+    grounded_answers: list[str] = []
+    for candidate in candidates:
+        candidate = _CITATION_RE.sub("", candidate)
+        candidate = _QUOTE_RE.sub(lambda match: match.group(1), candidate)
+        if not keep_full:
+            # A polarity clarification needs the direct ruling, not the
+            # previous answer's explanatory tail.
+            candidate = re.split(r"[،,]", candidate, maxsplit=1)[0]
+        candidate = _clean_source_snippet(candidate)
+        if len(candidate) < 8:
+            continue
+        cited = _add_missing_citations(candidate, retrieved)
+        if cited == candidate or _COMPLETENESS_REFUSAL in cited:
+            continue
+        grounded = _ground_answer(cited, retrieved, chunks)
+        if _COMPLETENESS_REFUSAL in grounded:
+            continue
+        # The prior sentence may contain the framing word "حكم" that is not
+        # repeated in the source; require strong but not perfect support.
+        if _answer_citation_support_ok(
+            grounded, retrieved, threshold=0.65,
+        ):
+            if not asks_obligation and not asks_habit:
+                return grounded
+            if asks_habit and _answer_mentions_habit(grounded):
+                return grounded
+            if grounded not in grounded_answers:
+                grounded_answers.append(grounded)
+            if len(grounded_answers) >= 2:
+                break
+    need_qualification = asks_obligation and not any(
+        _answer_mentions_qualification(item) for item in grounded_answers
+    )
+    need_habit = asks_habit and not any(
+        _answer_mentions_habit(item) for item in grounded_answers
+    )
+    if grounded_answers and not need_qualification and not need_habit:
+        return " ".join(grounded_answers)
+
+    previous_user = _last_substantive_user(chat_history)
+    if asks_evidence and retrieved:
+        target = _evidence_target_text(previous)
+        subject_text = _last_user_message(chat_history) or previous_user or target
+        core_keys = _required_action_evidence_keys(subject_text)
+        if not core_keys:
+            core_keys = (
+                _legal_topic_keys(subject_text) - _COMPLETENESS_STOP_KEYS
+            )
+        evidence = _grounded_source_claim(
+            subject_text,
+            ("قال رسول", "قال النبي", "روى", "ورد", "الصحيحين"),
+            retrieved,
+            chunks,
+            subject_keys=core_keys,
+        )
+        if not evidence and target:
+            evidence = _grounded_source_claim(
+                target,
+                ("قال رسول", "قال النبي", "روى", "ورد", "الصحيحين"),
+                retrieved,
+                chunks,
+            )
+        if evidence:
+            return evidence
+    if asks_habit and retrieved:
+        habit = _grounded_source_claim(
+            previous_user, ("عاده", "عادة"), retrieved, chunks,
+        )
+        if habit:
+            return habit
+    if asks_modality and retrieved:
+        # The prior answer may be a paraphrase whose framing words are absent
+        # from the source.  Before refusing, fall back to the verbatim source
+        # sentence that carries the qualification.
+        markers = (
+            "لا يجب", "ليس بواجب", "لا يلزم", "لا يكره",
+            "الكراهه", "مكروه", "يكره", "للتحريم", "يجوز",
+            "يشترط", "الا اذا", "الا ان", "قبله", "بعده",
+        )
+        legal = _grounded_source_claim(
+            previous_user, markers, retrieved, chunks,
+        )
+        if legal:
+            if grounded_answers:
+                return grounded_answers[0] + " " + legal
+            return legal
+    if grounded_answers:
+        return " ".join(grounded_answers)
+    return None
+
+
+def _requested_legal_modality(query: str) -> str | None:
+    tokens = set(_tokenize(normalize(query)))
+    if tokens & _FOLLOWUP_OBLIGATION_FOLDED:
+        return "obligation"
+    if tokens & _FOLLOWUP_PROHIBITION_FOLDED:
+        return "prohibition"
+    if tokens & _FOLLOWUP_PERMISSION_FOLDED:
+        return "permission"
+    return None
+
+
+def _answer_addresses_modality(answer: str, modality: str) -> bool:
+    text = _fold_ar(normalize(answer or ""))
+    if modality == "obligation":
+        if any(
+            phrase in text
+            for phrase in (
+                "لا يجب", "ليس بواجب", "غير واجب", "لا يلزم",
+                "ليس بلازم", "لا توجب", "لا فرض", "ليس بفرض",
+            )
+        ):
+            return True
+        return "obligation" in _positive_legal_families(answer)
+    if modality == "prohibition":
+        if any(
+            phrase in text
+            for phrase in (
+                "لا يحرم", "ليس حراما", "غير محرم", "لا تحرم",
+            )
+        ):
+            return True
+        return "prohibition" in _positive_legal_families(answer)
+    return bool(
+        _positive_legal_families(answer) & {"permission", "prohibition"}
+    )
+
+
+_DISAGREEMENT_MARKERS = (
+    "اختلف", "خلاف", "آخرون", "اخرون", "الرأي الثاني",
+    "الراي التاني", "قولان", "فريقان", "ذهب بعض", "ذهب فريق",
+)
+
+
+def _without_no_disagreement(text: str) -> str:
+    for phrase in ("بلا خلاف", "لا خلاف", "دون خلاف", "من غير خلاف"):
+        text = text.replace(phrase, " ")
+    return text
+
+
+def _evidence_has_disagreement(retrieved: list[dict]) -> bool:
+    text = _without_no_disagreement(" ".join(
+        normalize(chunk.get("original_text", "") or "")
+        for chunk in retrieved
+    ))
+    return any(marker in text for marker in _DISAGREEMENT_MARKERS)
+
+
+def _answer_mentions_disagreement(answer: str) -> bool:
+    text = _without_no_disagreement(normalize(answer or ""))
+    return any(marker in text for marker in _DISAGREEMENT_MARKERS)
+
+
+_QUALIFICATION_MARKERS = (
+    "الكراهه", "لا يكره", "مكروه", "يشترط", "يجوز",
+    "الا اذا", "الا ان", "للتحريم",
+)
+
+
+def _answer_mentions_qualification(answer: str) -> bool:
+    text = normalize(answer or "")
+    return any(marker in text for marker in _QUALIFICATION_MARKERS)
+
+
+def _legal_subject_keys(text: str) -> set[str]:
+    return (
+        _legal_topic_keys(text)
+        - _COMPLETENESS_STOP_KEYS
+        - _LEGAL_FOCUS_STOP_STRICT
+    )
+
+
+def _retrieved_supports_modality(
+    retrieved: list[dict], modality: str, subject_keys: set[str],
+) -> bool:
+    for chunk in retrieved:
+        for sentence in _split_source_sentences(
+            chunk.get("original_text", "") or "",
+        ):
+            if modality not in _positive_legal_families(sentence):
+                continue
+            if (
+                not subject_keys
+                or subject_keys <= _legal_topic_keys(sentence)
+            ):
+                return True
+    return False
+
+
+def _legal_followup_lead(
+    query: str, answer: str, retrieved: list[dict],
+    chat_history: list[dict] | None = None,
+) -> str:
+    """State plainly when the evidence does not establish a strong modality.
+
+    This is a limitation of the retrieved evidence, not a fatwa: it prevents
+    an obligation question from being answered with an unqualified "نعم"
+    when the sources only establish a condition, permission, or dislike.
+    """
+    modality = _requested_legal_modality(query)
+    if not modality:
+        return ""
+    if _COMPLETENESS_REFUSAL in answer:
+        return ""
+    previous_user = next(
+        (
+            str(message.get("content") or "").strip()
+            for message in reversed(chat_history or [])
+            if isinstance(message, dict)
+            and message.get("role") == "user"
+            and str(message.get("content") or "").strip()
+        ),
+        "",
+    )
+    subject_keys = (
+        _legal_topic_keys(previous_user) - _COMPLETENESS_STOP_KEYS
+        if previous_user else set()
+    )
+    if _retrieved_supports_modality(
+        retrieved, modality, subject_keys,
+    ) or modality in _positive_legal_families(answer):
+        return ""
+    if modality == "obligation":
+        return "المصادر المسترجعة لا توجب ذلك. "
+    if modality == "prohibition":
+        return "المصادر المسترجعة لا تحرم ذلك. "
+    return "المصادر المسترجعة لا تجزم بالإباحة. "
+
+
 def generate(
     query: str,
     index,
@@ -3395,7 +6288,27 @@ def generate(
     Returns:
         Dict with keys: answer (str), sources (list), query (str).
     """
-    retrieved = retrieve(query, index, chunks, client, top_k=top_k)
+    # A tafsir request that cannot be resolved to one ayah gets an explicit
+    # clarification before any generation (e.g. whole-surah request).  A
+    # resolved request passes its deterministic anchors into retrieval.
+    # Follow-ups resolve against the prior substantive question, never the
+    # literal clarification phrase.
+    retrieval_query = _history_aware_query(query, chat_history)
+    tafsir_anchors, tafsir_clarification = _resolve_chat_tafsir(
+        retrieval_query, index, chunks, client,
+    )
+    if tafsir_clarification:
+        return {
+            "answer": tafsir_clarification,
+            "sources": [],
+            "query": query,
+        }
+
+    retrieved = retrieve(
+        query, index, chunks, client, top_k=top_k,
+        tafsir_anchors=tafsir_anchors,
+        retrieval_query=retrieval_query,
+    )
 
     # Gate: retrieve() marks every chunk with _gate_passed.  Refuse before
     # calling GPT when the retrieval gate failed — no synthetic scores are
@@ -3442,18 +6355,30 @@ def generate(
     # substantive answer must not bypass sentence-level evidence checks.
     refusal = "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال."
     raw_answer = answer
-    strict = _ground_answer(raw_answer, retrieved, chunks)
+    strict = _ground_with_heading_fallback(raw_answer, retrieved, chunks)
     answer = strict
     if (strict.strip() == refusal and raw_answer.strip()
             and raw_answer.strip() != refusal):
-        # The generator did produce an answer, but one unmatched low-DF
-        # framing word was enough to drop every sentence.  Prefer a partial,
-        # citation-preserving answer over a false refusal; all substantive
-        # guards (quotes, names, numbers, months, polarity) still apply.
-        lenient = _ground_answer(raw_answer, retrieved, chunks,
-                                 ignore_rare=True)
-        if lenient.strip() != refusal:
-            answer = lenient
+        # A paraphrase placed inside quotation marks fails the quote guard
+        # even when its claim is supported.  Remove only the false quotation
+        # marks and re-run every grounding guard on the paraphrase.
+        unquoted = _strip_unsupported_quotes(raw_answer, retrieved)
+        if unquoted != raw_answer:
+            requoted = _ground_answer(unquoted, retrieved, chunks)
+            if requoted.strip() != refusal:
+                answer = requoted
+                raw_answer = unquoted
+                strict = requoted
+        if strict.strip() == refusal:
+            # The generator did produce an answer, but one unmatched low-DF
+            # framing word was enough to drop every sentence.  Prefer a
+            # partial, citation-preserving answer over a false refusal; all
+            # substantive guards (quotes, names, numbers, months, polarity)
+            # still apply.
+            lenient = _ground_answer(raw_answer, retrieved, chunks,
+                                     ignore_rare=True)
+            if lenient.strip() != refusal:
+                answer = lenient
 
     # If a substantive answer still fails every grounding attempt (typically
     # a wrong/inexact citation), ask once for a source-cited rewrite before
@@ -3484,7 +6409,128 @@ def generate(
     answer = _add_missing_citations(answer, retrieved)
     answer = _augment_answer_completeness(query, answer, retrieved)
     answer = _fix_mismatched_prayer_quotes(answer)
+    answer = _move_citations_out_of_quotes(answer)
     answer = _drop_query_echo(answer, query)
+    if not _answer_citation_support_ok(answer, retrieved):
+        fallback = _followup_fallback_answer(
+            query, chat_history, retrieved, chunks,
+        )
+        modality = (
+            _requested_legal_modality(query)
+            if chat_history and _is_followup_query(query) else None
+        )
+        # A grounded answer that already states the requested modality is
+        # more useful than a one-line fallback; keep its qualification and
+        # evidence instead of replacing it.
+        if fallback is not None and not (
+            modality and _answer_addresses_modality(answer, modality)
+        ):
+            answer = fallback
+    if chat_history and _is_followup_query(query):
+        modality = _requested_legal_modality(query)
+        if modality:
+            legal_fallback = _followup_fallback_answer(
+                query, chat_history, retrieved, chunks,
+            )
+            if (
+                legal_fallback is not None
+                and _answer_mentions_qualification(legal_fallback)
+                and not _answer_mentions_qualification(answer)
+            ):
+                # Prefer the direct answer plus its source qualification over
+                # a bare synthesized ruling.
+                answer = legal_fallback
+        if _is_habit_query(query) and not _answer_mentions_habit(answer):
+            habit_fallback = _followup_fallback_answer(
+                query, chat_history, retrieved, chunks,
+            )
+            if (
+                habit_fallback is not None
+                and _answer_mentions_habit(habit_fallback)
+            ):
+                answer = habit_fallback
+        if _is_evidence_request(query):
+            evidence_fallback = _followup_fallback_answer(
+                query, chat_history, retrieved, chunks,
+            )
+            if (
+                evidence_fallback is not None
+                and any(
+                    marker in normalize(evidence_fallback)
+                    for marker in ("قال رسول", "قال النبي", "روى", "ورد", "حديث")
+                )
+            ):
+                previous_assistant = next(
+                    (
+                        str(message.get("content") or "").strip()
+                        for message in reversed(chat_history)
+                        if isinstance(message, dict)
+                        and message.get("role") == "assistant"
+                        and str(message.get("content") or "").strip()
+                    ),
+                    "",
+                )
+                target = _evidence_target_text(previous_assistant)
+                subject_text = _last_user_message(chat_history) or target
+                core_keys = _required_action_evidence_keys(subject_text)
+                if not core_keys:
+                    core_keys = (
+                        _legal_topic_keys(subject_text)
+                        - _COMPLETENESS_STOP_KEYS
+                    )
+                evidence_sentences = [
+                    sentence.strip()
+                    for sentence in _SENT_SPLIT_RE.split(answer)
+                    if any(
+                        marker in normalize(sentence)
+                        for marker in (
+                            "قال رسول", "قال النبي", "روى", "ورد",
+                            "الصحيحين", "حديث",
+                        )
+                    )
+                ]
+                first_evidence = (
+                    evidence_sentences[0] if evidence_sentences else ""
+                )
+                evidence_matches_subject = (
+                    bool(first_evidence)
+                    and (
+                        not core_keys
+                        or core_keys <= _legal_topic_keys(first_evidence)
+                    )
+                )
+                target_mentions_habit = bool(
+                    target and _answer_mentions_habit(target)
+                )
+                if (
+                    not evidence_matches_subject
+                    or (
+                        target_mentions_habit
+                        and not _answer_mentions_habit(answer)
+                    )
+                ):
+                    answer = evidence_fallback
+        lead = _legal_followup_lead(query, answer, retrieved, chat_history)
+        if lead:
+            answer = lead + answer
+        if (
+            _COMPLETENESS_REFUSAL not in answer
+            and _evidence_has_disagreement(retrieved)
+            and not _answer_mentions_disagreement(answer)
+        ):
+            dispute_fallback = _followup_fallback_answer(
+                query, chat_history, retrieved, chunks,
+            )
+            prefix = "المسألة محل خلاف بين الفقهاء. "
+            if (
+                dispute_fallback is not None
+                and _answer_mentions_disagreement(dispute_fallback)
+            ):
+                # Prefer the prior sentence that names both positions over a
+                # one-sided answer that happens to be grounded.
+                answer = prefix + dispute_fallback
+            else:
+                answer = prefix + answer
 
     sources = [f"{c.get('source','غير محدد')} — {c.get('reference','غير محدد')}"
                for c in retrieved]

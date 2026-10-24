@@ -40,6 +40,12 @@ const protect = async (req, res, next) => {
       );
     }
 
+    if (!currentUser.isActive) {
+      return next(
+        new AppError(401, "Account is deactivated", HttpStatusText.FAIL),
+      );
+    }
+
     if (currentUser.changedPasswordAfter(decoded.iat)) {
       return next(
         new AppError(
@@ -70,6 +76,12 @@ const optionalAuth = async (req, res, next) => {
     if (!currentUser) {
       return next(
         new AppError( 401, "User no longer exists", HttpStatusText.FAIL),
+      );
+    }
+
+    if (!currentUser.isActive) {
+      return next(
+        new AppError(401, "Account is deactivated", HttpStatusText.FAIL),
       );
     }
 

@@ -8,6 +8,7 @@ const labels = {
   ayah: "الآية",
   reference: "المرجع",
   source: "المصدر",
+  source_scope: "نطاق نص المصدر",
   sources: "المصادر",
   conclusion: "الخلاصة",
   result: "النتيجة",
