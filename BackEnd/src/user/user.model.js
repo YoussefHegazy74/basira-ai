@@ -7,27 +7,27 @@ const userSchema = new mongoose.Schema(
   {
     firstName: {
       type: String,
-      required: [true, "First name is required"],
+      required: [true, "الاسم الأول مطلوب"],
       trim: true,
     },
 
     lastName: {
       type: String,
-      required: [true, "Last name is required"],
+      required: [true, "اسم العائلة مطلوب"],
       trim: true,
     },
 
     email: {
       type: String,
-      required: [true, "Email is required"],
-      unique: true,
+      required: [true, "البريد الإلكتروني مطلوب"],
+      unique: [true, "البريد الإلكتروني مستخدم بالفعل"],
       lowercase: true,
       trim: true,
-      validate: [validator.isEmail, "Please enter a valid email"],
+      validate: [validator.isEmail, "يرجى إدخال بريد إلكتروني صالح"],
     },
     password: {
       type: String,
-      required: [true, "Password is required"],
+      required: [true, "كلمة المرور مطلوبة"],
       select: false,
     },
 

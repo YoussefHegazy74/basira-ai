@@ -24,7 +24,7 @@ test("unknown route returns the JSON 404 contract", async () => {
   assert.equal(response.status, 404);
   assert.deepEqual(await response.json(), {
     status: "Fail",
-    message: "Page Not Found",
+    message: "الصفحة غير موجودة",
   });
 });
 
@@ -54,7 +54,7 @@ test("guest chat rejects an empty message before touching MongoDB", async () => 
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), {
     status: "Bad Request",
-    message: "Message is required",
+    message: "الرسالة مطلوبة",
     errors: [],
   });
 });
@@ -69,7 +69,7 @@ test("tafsir rejects a missing ayah before touching MongoDB", async () => {
   assert.equal(response.status, 400);
   assert.deepEqual(await response.json(), {
     status: "Bad Request",
-    message: "Ayah is required",
+    message: "الآية مطلوبة",
     errors: [],
   });
 });

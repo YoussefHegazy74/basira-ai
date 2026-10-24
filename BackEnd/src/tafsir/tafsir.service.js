@@ -46,7 +46,7 @@ const askModel = async (ayah) => {
 /// get tafsir
 const tafsir = async (ayah, userId, guestKey) => {
   if (!ayah) {
-    throw new AppError(400, "Ayah is required", HttpStatus.BAD_REQUEST);
+    throw new AppError(400, "الآية مطلوبة", HttpStatus.BAD_REQUEST);
   }
   if (!userId) {
     return await gusetTafsir(ayah, userId, guestKey);

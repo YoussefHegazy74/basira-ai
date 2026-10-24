@@ -122,7 +122,7 @@ test("forgot-password does not reveal an unknown account", async () => {
   const body = await response.json();
   assert.equal(
     body.message,
-    "If the email exists, a password reset link has been sent.",
+    "إذا كان البريد الإلكتروني موجودًا، فقد تم إرسال رابط إعادة تعيين كلمة المرور.",
   );
 });
 
@@ -134,5 +134,5 @@ test("login rejects an incorrect password", async () => {
   });
 
   assert.equal(response.status, 401);
-  assert.equal((await response.json()).message, "Incorrect email or password");
+  assert.equal((await response.json()).message, "البريد الإلكتروني أو كلمة المرور غير صحيحة");
 });

@@ -233,11 +233,11 @@ test("authentication and input validation still reject invalid requests", async 
     cookie: "token=not-a-real-token",
   });
   assert.equal(invalidToken.status, 401);
-  assert.equal((await invalidToken.json()).message, "Invalid token");
+  assert.equal((await invalidToken.json()).message, "رمز غير صالح");
 
   const tooLong = await messageRequest("ا".repeat(501), {
     cookie: userCookie,
   });
   assert.equal(tooLong.status, 400);
-  assert.match((await tooLong.json()).message, /maximum length/i);
+  assert.match((await tooLong.json()).message, /الحد الأقصى للطول/);
 });

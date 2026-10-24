@@ -17,17 +17,17 @@ const signToken = (id) =>
   });
 
 const buildVerificationEmail = (code) => ({
-  subject: "Email Verification",
-  text: `Your verification code is: ${code}. It expires in 5 minutes.`,
+  subject: "التحقق من البريد الإلكتروني",
+  text: `رمز التحقق الخاص بك هو: ${code}. تنتهي صلاحيته خلال 5 دقائق.`,
   html: `
     <div style="font-family: Arial, sans-serif; max-width: 500px; margin: auto; padding: 24px; text-align: center; border: 1px solid #e5e7eb; border-radius: 12px;">
-      <h2 style="color: #111827;">Email Verification</h2>
-      <p style="color: #4b5563;">Use the code below to verify your email address.</p>
+      <h2 style="color: #111827;">التحقق من البريد الإلكتروني</h2>
+      <p style="color: #4b5563;">استخدم الرمز أدناه للتحقق من عنوان بريدك الإلكتروني.</p>
       <div style="margin: 24px 0; padding: 16px; background-color: #f3f4f6; border-radius: 8px;">
         <h1 style="letter-spacing: 8px; color: #2563eb; margin: 0;">${code}</h1>
       </div>
-      <p style="color: #6b7280; font-size: 14px;">This code expires in 5 minutes.</p>
-      <p style="color: #9ca3af; font-size: 12px;">If you didn't request this code, you can ignore this email.</p>
+      <p style="color: #6b7280; font-size: 14px;">تنتهي صلاحية هذا الرمز خلال 5 دقائق.</p>
+      <p style="color: #9ca3af; font-size: 12px;">إذا لم تطلب هذا الرمز، يمكنك تجاهل هذا البريد الإلكتروني.</p>
     </div>
   `,
 });
@@ -40,7 +40,7 @@ const register = async ({
   passwordconfirm,
 }) => {
   if (await User.exists({ email })) {
-    throw new AppError(409, "Email already exists", HttpStatus.FAIL);
+    throw new AppError(409, "البريد الإلكتروني مستخدم بالفعل", HttpStatus.FAIL);
   }
   await pendingUserModel.deleteMany({ email });
   const verificationToken = generateVerificationCode();
@@ -64,7 +64,7 @@ const register = async ({
 
     throw new AppError(
       500,
-      "Failed to send verification email",
+      "فشل إرسال بريد التحقق",
       HttpStatus.ERROR,
     );
   }
@@ -78,7 +78,7 @@ const login = async (userData) => {
   const user = await User.findOne({ email }).select("+password");
 
   if (!user || !(await user.correctPassword(userData.password))) {
-    throw new AppError(401, "Incorrect email or password", HttpStatus.FAIL);
+    throw new AppError(401, "البريد الإلكتروني أو كلمة المرور غير صحيحة", HttpStatus.FAIL);
   }
 
   // Deactivation must not be reversible by logging in again.  Only an admin
@@ -114,9 +114,9 @@ const forgotPassword = async (req, res) => {
 
   await sendEmail({
     to: user.email,
-    subject: "Password Reset",
+    subject: "إعادة تعيين كلمة المرور",
 
-    text: `You requested a password reset. Click the following link to reset your password: ${resetURL}`,
+    text: `لقد طلبت إعادة تعيين كلمة المرور. انقر على الرابط التالي لإعادة تعيين كلمة المرور: ${resetURL}`,
 
     html: `
       <div style="
@@ -145,7 +145,7 @@ const forgotPassword = async (req, res) => {
               font-size: 24px;
               margin: 0;
             ">
-              Password Reset
+              إعادة تعيين كلمة المرور
             </h1>
           </div>
 
@@ -157,7 +157,7 @@ const forgotPassword = async (req, res) => {
               font-size: 20px;
               margin-top: 0;
             ">
-              Hello,
+              مرحبًا،
             </h2>
 
             <p style="
@@ -165,8 +165,8 @@ const forgotPassword = async (req, res) => {
               line-height: 1.7;
               color: #4b5563;
             ">
-              We received a request to reset your password.
-              Click the button below to choose a new password.
+              تلقينا طلبًا لإعادة تعيين كلمة المرور الخاصة بك.
+              انقر على الزر أدناه لاختيار كلمة مرور جديدة.
             </p>
 
             <!-- Reset Button -->
@@ -181,7 +181,7 @@ const forgotPassword = async (req, res) => {
                 font-size: 15px;
                 font-weight: bold;
               ">
-                Reset Password
+                إعادة تعيين كلمة المرور
               </a>
             </div>
 
@@ -190,8 +190,8 @@ const forgotPassword = async (req, res) => {
               line-height: 1.6;
               color: #6b7280;
             ">
-              If you didn't request a password reset, you can
-              safely ignore this email. Your password will remain unchanged.
+              إذا لم تطلب إعادة تعيين كلمة المرور، يمكنك
+              تجاهل هذا البريد الإلكتروني بأمان. ستبقى كلمة المرور الخاصة بك دون تغيير.
             </p>
 
           </div>
@@ -208,7 +208,7 @@ const forgotPassword = async (req, res) => {
               margin: 0;
             ">
               &copy; ${new Date().getFullYear()} Basira AI.
-              All rights reserved.
+              جميع الحقوق محفوظة.
             </p>
           </div>
 
@@ -228,12 +228,12 @@ const resetPassword = async (token, newPassword, newPasswordConfirm) => {
   if (!user) {
     throw new AppError(
       400,
-      "Token is invalid or has expired",
+      "الرمز غير صالح أو منتهي الصلاحية",
       HttpStatus.BAD_REQUEST,
     );
   }
   if (newPassword !== newPasswordConfirm) {
-    throw new AppError(400, "Passwords do not match", HttpStatus.BAD_REQUEST);
+    throw new AppError(400, "كلمتا المرور غير متطابقتين", HttpStatus.BAD_REQUEST);
   }
   if (
     !validator.isStrongPassword(newPassword, {
@@ -246,7 +246,7 @@ const resetPassword = async (token, newPassword, newPasswordConfirm) => {
   ) {
     throw new AppError(
       400,
-      "Password must be at least 8 characters and include uppercase, lowercase, number and symbol (@, $, ...)",
+      "يجب أن تكون كلمة المرور 8 أحرف على الأقل وتتضمن حرفًا كبيرًا وحرفًا صغيرًا ورقمًا ورمزًا (@، $، ...)",
       HttpStatus.BAD_REQUEST,
     );
   }
@@ -260,7 +260,7 @@ const resetPassword = async (token, newPassword, newPasswordConfirm) => {
 const changePassword = async (userId, currentPassword, newPassword) => {
   const user = await User.findById(userId).select("+password");
   if (!user || !(await user.correctPassword(currentPassword))) {
-    throw new AppError(401, "Incorrect current password", HttpStatus.FAIL);
+    throw new AppError(401, "كلمة المرور الحالية غير صحيحة", HttpStatus.FAIL);
   }
   if (
     !validator.isStrongPassword(newPassword, {
@@ -273,7 +273,7 @@ const changePassword = async (userId, currentPassword, newPassword) => {
   ) {
     throw new AppError(
       400,
-      "Password must be at least 8 characters and include uppercase, lowercase, number and symbol (@, $, ...)",
+      "يجب أن تكون كلمة المرور 8 أحرف على الأقل وتتضمن حرفًا كبيرًا وحرفًا صغيرًا ورقمًا ورمزًا (@، $، ...)",
       HttpStatus.BAD_REQUEST,
     );
   }
@@ -287,7 +287,7 @@ const changePassword = async (userId, currentPassword, newPassword) => {
 /// verify email
 const verifyEmail = async (token, email) => {
   if (typeof email !== "string" || typeof token !== "string") {
-    throw new AppError(400, "Email and code are required", HttpStatus.FAIL);
+    throw new AppError(400, "البريد الإلكتروني والرمز مطلوبان", HttpStatus.FAIL);
   }
   const pendingUser = await pendingUserModel
     .findOne({
@@ -295,11 +295,11 @@ const verifyEmail = async (token, email) => {
     })
     .select("+password");
   if (!pendingUser) {
-    throw new AppError(400, "Email not found", HttpStatus.FAIL);
+    throw new AppError(400, "البريد الإلكتروني غير موجود", HttpStatus.FAIL);
   }
   if (pendingUser.verificationTokenExpiresAt < Date.now()) {
     await pendingUserModel.deleteOne({ _id: pendingUser._id });
-    throw new AppError(400, "Verification token has expired", HttpStatus.FAIL);
+    throw new AppError(400, "انتهت صلاحية رمز التحقق", HttpStatus.FAIL);
   }
   if (pendingUser.VerificationToken !== token) {
     pendingUser.limit -= 1;
@@ -308,11 +308,11 @@ const verifyEmail = async (token, email) => {
       await pendingUserModel.deleteOne({ _id: pendingUser._id });
       throw new AppError(
         400,
-        "Verification token has expired",
+        "انتهت صلاحية رمز التحقق",
         HttpStatus.FAIL,
       );
     }
-    throw new AppError(400, "Invalid verification token", HttpStatus.FAIL);
+    throw new AppError(400, "رمز التحقق غير صالح", HttpStatus.FAIL);
   }
   await User.create({
     firstName: pendingUser.firstName,
@@ -337,11 +337,11 @@ const deactivateAccount = async (userId) => {
   const user = await User.findById(userId);
 
   if (!user) {
-    throw new AppError(404, "User not found", HttpStatus.FAIL);
+    throw new AppError(404, "المستخدم غير موجود", HttpStatus.FAIL);
   }
 
   if (!user.isActive) {
-    throw new AppError(400, "Account is already deactivated", HttpStatus.FAIL);
+    throw new AppError(400, "الحساب معطّل بالفعل", HttpStatus.FAIL);
   }
 
   if (user.role === "admin") {

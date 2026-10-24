@@ -47,7 +47,7 @@ const HttpStatusText = require("./utils/HttpStatusText.js");
 const limiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 100,
-  message: "Too many requests from this IP, please try again after 1 hour",
+  message: "طلبات كثيرة جدًا من هذا العنوان، يرجى المحاولة بعد ساعة",
 });
 
 // ===== Global Middleware =====
@@ -113,7 +113,7 @@ app.use("/users", userRoutes);
 app.use((req, res, next) => {
   return res.status(404).json({
     status: HttpStatusText.FAIL,
-    message: "Page Not Found",
+    message: "الصفحة غير موجودة",
   });
 });
 
@@ -134,7 +134,7 @@ app.use((err, req, res, next) => {
   if (err.name === "JsonWebTokenError" || err.name === "TokenExpiredError") {
     return res.status(401).json({
       status: HttpStatusText.FAIL,
-      message: "Invalid or expired token, please log in again",
+      message: "الرمز غير صالح أو منتهي الصلاحية، يرجى تسجيل الدخول مرة أخرى",
     });
   }
 
@@ -142,14 +142,14 @@ app.use((err, req, res, next) => {
   if (err.code === 11000) {
     return res.status(400).json({
       status: HttpStatusText.FAIL,
-      message: "Email already exists",
+      message: "البريد الإلكتروني مستخدم بالفعل",
     });
   }
 
   // Default error
   const payload = {
     status: err.statustext || HttpStatusText.ERROR,
-    message: err.message || "Something Went Wrong",
+    message: err.message || "حدث خطأ ما",
     errors: err.errors || [],
   };
   // Structured recovery metadata (conversation/message IDs, retryable flag)

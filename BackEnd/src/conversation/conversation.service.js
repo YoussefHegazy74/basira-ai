@@ -7,21 +7,21 @@ const HttpStatus = require("../utils/HttpStatusText.js");
 /// get conversation that belongs to this user (404 if not found or not his)
 const getOwnedOrThrow = async (conversationId, userId) => {
   if (!mongoose.isValidObjectId(conversationId)) {
-    throw new AppError(404, "Conversation not found", HttpStatus.FAIL);
+    throw new AppError(404, "المحادثة غير موجودة", HttpStatus.FAIL);
   }
   const conversation = await Conversation.findOne({
     _id: conversationId,
     userId,
   });
   if (!conversation) {
-    throw new AppError(404, "Conversation not found", HttpStatus.FAIL);
+    throw new AppError(404, "المحادثة غير موجودة", HttpStatus.FAIL);
   }
   return conversation;
 };
 
 //// create new conversation
 const createConversation = async (userId, firstMessage) => {
-  const title = firstMessage ? firstMessage.trim().slice(0, 40) : "New chat";
+  const title = firstMessage ? firstMessage.trim().slice(0, 40) : "محادثة جديدة";
   return await Conversation.create({
     userId,
     title,
@@ -52,7 +52,7 @@ const getConversationById = async (conversationId, userId) => {
 const renameConversation = async ({ conversationId, userId, newTitle }) => {
   const title = typeof newTitle === "string" ? newTitle.trim() : "";
   if (!title) {
-    throw new AppError(400, "Title is required", HttpStatus.BAD_REQUEST);
+    throw new AppError(400, "العنوان مطلوب", HttpStatus.BAD_REQUEST);
   }
   const conversation = await Conversation.findOneAndUpdate(
     { _id: conversationId, userId },
@@ -60,7 +60,7 @@ const renameConversation = async ({ conversationId, userId, newTitle }) => {
     { returnDocument: "after", runValidators: true },
   );
   if (!conversation) {
-    throw new AppError(404, "Conversation not found", HttpStatus.FAIL);
+    throw new AppError(404, "المحادثة غير موجودة", HttpStatus.FAIL);
   }
   return conversation;
 };

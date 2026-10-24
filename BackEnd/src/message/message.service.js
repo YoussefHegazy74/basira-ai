@@ -91,14 +91,14 @@ const askModel = async (query, chatHistory = []) => {
     });
 
     if (!response.ok) {
-      throw new Error(`AI server responded with ${response.status}`);
+      throw new Error(`استجاب خادم الذكاء الاصطناعي بالرمز ${response.status}`);
     }
 
     const data = await response.json();
     return { answer: data.answer, sources: data.sources || [] };
   } catch (error) {
     console.error("AI model failed:", error.message);
-    throw new AppError(502, "AI model failed", HttpStatus.ERROR);
+    throw new AppError(502, "فشل نموذج الذكاء الاصطناعي", HttpStatus.ERROR);
   }
 };
 
@@ -106,13 +106,13 @@ const askModel = async (query, chatHistory = []) => {
 /// returns { query, chatHistory }
 const sanitizeGuestInput = (message, chatHistory) => {
   if (typeof message !== "string" || !message.trim()) {
-    throw new AppError(400, "Message is required", HttpStatus.BAD_REQUEST);
+    throw new AppError(400, "الرسالة مطلوبة", HttpStatus.BAD_REQUEST);
   }
   const query = message.trim();
   if (query.length > GUEST_MAX_CONTENT_LENGTH) {
     throw new AppError(
       400,
-      `Message exceeds maximum length of ${GUEST_MAX_CONTENT_LENGTH} characters`,
+      `الرسالة تتجاوز الحد الأقصى للطول البالغ ${GUEST_MAX_CONTENT_LENGTH} حرفًا`,
       HttpStatus.BAD_REQUEST,
     );
   }
@@ -151,13 +151,13 @@ const sendUserMessage = async ({
   clientMessageId,
 }) => {
   if (typeof content !== "string" || !content.trim()) {
-    throw new AppError(400, "Message is required", HttpStatus.BAD_REQUEST);
+    throw new AppError(400, "الرسالة مطلوبة", HttpStatus.BAD_REQUEST);
   }
   content = content.trim();
   if (content.length > MAX_CONTENT_LENGTH) {
     throw new AppError(
       400,
-      `Message exceeds maximum length of ${MAX_CONTENT_LENGTH} characters`,
+      `الرسالة تتجاوز الحد الأقصى للطول البالغ ${MAX_CONTENT_LENGTH} حرفًا`,
       HttpStatus.BAD_REQUEST,
     );
   }
@@ -347,11 +347,11 @@ const sendMessage = async ({
 /// messageCount is NOT decremented, so deleting can't bypass the limit
 const deleteMessage = async ({ messageId, userId }) => {
   if (!mongoose.isValidObjectId(messageId)) {
-    throw new AppError(404, "Message not found", HttpStatus.FAIL);
+    throw new AppError(404, "الرسالة غير موجودة", HttpStatus.FAIL);
   }
   const message = await Message.findById(messageId);
   if (!message) {
-    throw new AppError(404, "Message not found", HttpStatus.FAIL);
+    throw new AppError(404, "الرسالة غير موجودة", HttpStatus.FAIL);
   }
   // ownership is checked through the conversation
   await conversationService.getOwnedOrThrow(message.conversationId, userId);

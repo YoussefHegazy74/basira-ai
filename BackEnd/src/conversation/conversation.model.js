@@ -7,7 +7,7 @@ const conversationSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    title: { type: String, default: "New chat", trim: true, maxlength: 100 },
+    title: { type: String, default: "محادثة جديدة", trim: true, maxlength: 100 },
     messageCount: { type: Number, default: 0, min: 0 },
   },
   { timestamps: true, versionKey: false },

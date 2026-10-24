@@ -13,21 +13,21 @@ const askModel = async (text, explanation = "") => {
     });
 
     if (!response.ok) {
-      throw new Error(`AI server responded with ${response.status}`);
+      throw new Error(`استجاب خادم الذكاء الاصطناعي بالرمز ${response.status}`);
     }
 
     const data = await response.json();
     return data;
   } catch (error) {
     console.error("AI model failed:", error.message);
-    throw new AppError(502, "AI model failed", HttpStatus.ERROR);
+    throw new AppError(502, "فشل نموذج الذكاء الاصطناعي", HttpStatus.ERROR);
   }
 };
 
 // Verify text
 const verify = async (text, explanation = "", userId, guestKey) => {
   if (!text) {
-    throw new AppError(400, "Text is required", HttpStatus.BAD_REQUEST);
+    throw new AppError(400, "النص مطلوب", HttpStatus.BAD_REQUEST);
   }
 
   if (!userId) {
