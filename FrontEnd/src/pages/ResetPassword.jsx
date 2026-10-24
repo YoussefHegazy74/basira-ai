@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import AuthShell from "../components/AuthShell";
 import api from "../services/api";
-import "./ResetPassword.css";
-
+import { arabicMessage } from "../utils/format";
+import "../styles/auth.css";
 
 function ResetPassword() {
   const { token } = useParams();
@@ -10,14 +11,27 @@ function ResetPassword() {
 
   const [newPassword, setNewPassword] = useState("");
   const [newPasswordConfirm, setNewPasswordConfirm] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  async function handleSubmit(e) {
-    e.preventDefault();
+  useEffect(() => {
+    if (!success) return undefined;
+    const timer = window.setTimeout(() => navigate("/signin"), 2200);
+    return () => window.clearTimeout(timer);
+  }, [success, navigate]);
+
+  async function handleSubmit(event) {
+    event.preventDefault();
     setError("");
     setSuccess("");
+
+    if (newPassword.length < 8) {
+      setError("اختر كلمة مرور من ثمانية أحرف على الأقل.");
+      return;
+    }
 
     if (newPassword !== newPasswordConfirm) {
       setError("كلمتا المرور غير متطابقتين.");
@@ -27,26 +41,24 @@ function ResetPassword() {
     setLoading(true);
 
     try {
-      const response = await api.patch(
-        `/auth/resetpassword/${token}`,
-        {
-          newPassword: newPassword,
-          newPasswordConfirm: newPasswordConfirm,
-        }
-      );
+      const response = await api.patch(`/auth/resetpassword/${token}`, {
+        newPassword,
+        newPasswordConfirm,
+      });
 
       setSuccess(
-        response.data.message || "تم تغيير كلمة المرور بنجاح."
+        arabicMessage(
+          response.data?.message,
+          "تم تغيير كلمة المرور. سننقلك إلى صفحة تسجيل الدخول.",
+        ),
       );
-
-      setTimeout(() => {
-        navigate("/signin");
-      }, 2000);
-    } catch (err) {
+    } catch (requestError) {
       setError(
-        err.response?.data?.message ||
-          err.response?.data?.Message ||
-          "تعذر تغيير كلمة المرور. ربما انتهت صلاحية الرابط."
+        arabicMessage(
+          requestError.response?.data?.message ||
+            requestError.response?.data?.Message,
+          "تعذّر تغيير كلمة المرور. ربما انتهت صلاحية الرابط، اطلب رابطًا جديدًا.",
+        ),
       );
     } finally {
       setLoading(false);
@@ -54,80 +66,124 @@ function ResetPassword() {
   }
 
   return (
-    <main className="reset-page">
-      <section className="reset-card">
-        <div className="reset-logo">B</div>
+    <AuthShell
+      eyebrow="كلمة مرور جديدة"
+      title="اختر كلمة مرور جديدة"
+      description="استخدم كلمة مرور قوية لم يسبق استخدامها في حسابك."
+      backTo="/signin"
+      backLabel="العودة إلى تسجيل الدخول"
+      asideTitle="خطوة بسيطة تفصلك عن حسابك"
+      asideText="اختر كلمة مرور واضحة لك وصعبة على الآخرين، ولا تشارك رابط إعادة التعيين مع أي شخص."
+      footer={
+        <>
+          تذكّرت كلمة المرور؟ <Link to="/signin">تسجيل الدخول</Link>
+        </>
+      }
+    >
+      {error ? (
+        <div className="alert alert-error" role="alert">
+          <i className="bi bi-exclamation-circle" aria-hidden="true"></i>
+          <span>{error}</span>
+        </div>
+      ) : null}
 
-        <h1>إنشاء كلمة مرور جديدة</h1>
+      {success ? (
+        <div className="alert alert-success" role="status">
+          <i className="bi bi-check-circle" aria-hidden="true"></i>
+          <span>{success}</span>
+        </div>
+      ) : null}
 
-        <p className="reset-description">
-          اختر كلمة مرور قوية لحماية حسابك في Basira AI.
-        </p>
-
-        {error && (
-          <div className="reset-alert reset-error" role="alert">
-            {error}
-          </div>
-        )}
-
-        {success && (
-          <div className="reset-alert reset-success" role="status">
-            {success}
-          </div>
-        )}
-
-        <form onSubmit={handleSubmit}>
-          <div className="reset-field">
-            <label htmlFor="newPassword">كلمة المرور الجديدة</label>
+      <form className="auth-form" onSubmit={handleSubmit} noValidate>
+        <div className="field">
+          <label htmlFor="newPassword">كلمة المرور الجديدة</label>
+          <div className="password-field">
             <input
               id="newPassword"
-              type="password"
+              type={showPassword ? "text" : "password"}
               autoComplete="new-password"
               placeholder="أدخل كلمة المرور الجديدة"
               value={newPassword}
-              onChange={(e) => setNewPassword(e.target.value)}
+              onChange={(event) => {
+                setNewPassword(event.target.value);
+                if (error) setError("");
+              }}
               minLength={8}
               required
               disabled={loading || Boolean(success)}
             />
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() => setShowPassword((current) => !current)}
+              aria-label={showPassword ? "إخفاء كلمة المرور" : "إظهار كلمة المرور"}
+              aria-pressed={showPassword}
+              disabled={loading || Boolean(success)}
+            >
+              <i
+                className={showPassword ? "bi bi-eye-slash" : "bi bi-eye"}
+                aria-hidden="true"
+              ></i>
+            </button>
           </div>
+        </div>
 
-          <div className="reset-field">
-            <label htmlFor="newPasswordConfirm">
-              تأكيد كلمة المرور
-            </label>
+        <div className="field">
+          <label htmlFor="newPasswordConfirm">تأكيد كلمة المرور</label>
+          <div className="password-field">
             <input
               id="newPasswordConfirm"
-              type="password"
+              type={showConfirm ? "text" : "password"}
               autoComplete="new-password"
               placeholder="أعد كتابة كلمة المرور"
               value={newPasswordConfirm}
-              onChange={(e) => setNewPasswordConfirm(e.target.value)}
+              onChange={(event) => {
+                setNewPasswordConfirm(event.target.value);
+                if (error) setError("");
+              }}
               minLength={8}
               required
               disabled={loading || Boolean(success)}
             />
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() => setShowConfirm((current) => !current)}
+              aria-label={
+                showConfirm ? "إخفاء تأكيد كلمة المرور" : "إظهار تأكيد كلمة المرور"
+              }
+              aria-pressed={showConfirm}
+              disabled={loading || Boolean(success)}
+            >
+              <i
+                className={showConfirm ? "bi bi-eye-slash" : "bi bi-eye"}
+                aria-hidden="true"
+              ></i>
+            </button>
           </div>
-
-          <p className="reset-hint">
-            يجب أن تحتوي كلمة المرور على 8 أحرف على الأقل،
-            وحرف كبير وحرف صغير ورقم ورمز خاص.
-          </p>
-
-          <button
-            className="reset-submit"
-            type="submit"
-            disabled={loading || Boolean(success)}
-          >
-            {loading ? "جارٍ تغيير كلمة المرور..." : "تغيير كلمة المرور"}
-          </button>
-        </form>
-
-        <div className="reset-footer">
-          <Link to="/signin">العودة إلى تسجيل الدخول</Link>
         </div>
-      </section>
-    </main>
+
+        <p className="field-hint">
+          ثمانية أحرف على الأقل. يُفضّل أن تجمع بين الحروف والأرقام.
+        </p>
+
+        <button
+          className="btn btn-primary"
+          type="submit"
+          disabled={loading || Boolean(success)}
+          aria-busy={loading}
+        >
+          {loading ? (
+            <>
+              <span className="spinner" aria-hidden="true"></span>
+              جارٍ تغيير كلمة المرور…
+            </>
+          ) : (
+            "حفظ كلمة المرور"
+          )}
+        </button>
+      </form>
+    </AuthShell>
   );
 }
 
