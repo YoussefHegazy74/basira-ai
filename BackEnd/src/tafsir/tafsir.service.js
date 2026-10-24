@@ -12,20 +12,20 @@ const askModel = async (ayah) => {
     });
 
     if (!response.ok) {
-      throw new Error(`AI server responded with ${response.status}`);
+      throw new Error(`استجاب خادم الذكاء الاصطناعي بالرمز ${response.status}`);
     }
 
     return await response.json();
   } catch (error) {
     console.error("AI model failed:", error.message);
-    throw new AppError(502, "AI model failed", HttpStatus.ERROR);
+    throw new AppError(502, "فشل نموذج الذكاء الاصطناعي", HttpStatus.ERROR);
   }
 };
 
 /// get tafsir
 const tafsir = async (ayah, userId, guestKey) => {
   if (!ayah) {
-    throw new AppError(400, "Ayah is required", HttpStatus.BAD_REQUEST);
+    throw new AppError(400, "الآية مطلوبة", HttpStatus.BAD_REQUEST);
   }
   if (!userId) {
     return await gusetTafsir(ayah, userId, guestKey);

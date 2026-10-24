@@ -9,7 +9,7 @@ const register = asyncWrapper(async (req, res, next) => {
   await AuthService.register(req.body);
   res.status(201).json({
     status: HttpStatus.SUCCESS,
-    Message: "Check your email for verification code.",
+    Message: "تحقق من بريدك الإلكتروني للحصول على رمز التحقق.",
   });
 });
 const login = asyncWrapper(async (req, res, next) => {
@@ -32,7 +32,7 @@ const forgotPassword = asyncWrapper(async (req, res, next) => {
   await AuthService.forgotPassword(req, res);
   res.status(200).json({
     status: HttpStatus.SUCCESS,
-    message: "If the email exists, a password reset link has been sent.",
+    message: "إذا كان البريد الإلكتروني موجودًا، فقد تم إرسال رابط إعادة تعيين كلمة المرور.",
   });
 });
 const resetPassword = asyncWrapper(async (req, res, next) => {
@@ -43,7 +43,7 @@ const resetPassword = asyncWrapper(async (req, res, next) => {
   );
   res.status(200).json({
     status: HttpStatus.SUCCESS,
-    message: "Password has been reset successfully.",
+    message: "تمت إعادة تعيين كلمة المرور بنجاح.",
   });
 });
 const changePassword = asyncWrapper(async (req, res, next) => {
@@ -60,7 +60,7 @@ const changePassword = asyncWrapper(async (req, res, next) => {
   });
   res.status(200).json({
     status: HttpStatus.SUCCESS,
-    message: "Password has been changed successfully.",
+    message: "تم تغيير كلمة المرور بنجاح.",
   });
 });
 const verifyEmail = asyncWrapper(async (req, res, next) => {
@@ -70,19 +70,19 @@ const verifyEmail = asyncWrapper(async (req, res, next) => {
   );
   res.status(200).json({
     status: HttpStatus.SUCCESS,
-    message: "Email has been verified successfully.",
+    message: "تم التحقق من البريد الإلكتروني بنجاح.",
   });
 });
 const logout = asyncWrapper(async (req, res, next) => {
   await AuthService.logout(req, res);
-  res.status(200).json({ status: HttpStatus.SUCCESS, message: "Logged out" });
+  res.status(200).json({ status: HttpStatus.SUCCESS, message: "تم تسجيل الخروج" });
 });
 /// deactivate account
 const deactivateAccount = asyncWrapper(async (req, res, next) => {
   await AuthService.deactivateAccount(req.user._id);
   res.status(200).json({
     status: HttpStatus.SUCCESS,
-    message: "Account has been deactivated successfully.",
+    message: "تم تعطيل الحساب بنجاح.",
   });
 });
 module.exports = {

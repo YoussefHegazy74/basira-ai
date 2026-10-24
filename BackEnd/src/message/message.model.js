@@ -17,7 +17,7 @@ const messageSchema = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
-      maxlength: [20000, "Content cannot exceed 20,000 characters"],
+      maxlength: [20000, "لا يمكن أن يتجاوز المحتوى 20,000 حرف"],
     },
   },
   { timestamps: { createdAt: true, updatedAt: false }, versionKey: false },

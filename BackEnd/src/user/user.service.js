@@ -12,19 +12,20 @@ const getAllUsers = async () => {
 const getUserById = async (userId) => {
   const user = await User.findById(userId);
   if (!user) {
-    throw new AppError(404, "User not found", HttpStatus.FAIL);
+    throw new AppError(404, "المستخدم غير موجود", HttpStatus.FAIL);
   }
   return user;
 };
 
 /// update user by id
-const updateUserById = async (userId, updateData) => {
+const updateUserById = async (userId, email, firstName, lastName) => {
+  const updateData = { email, firstName, lastName };
   const user = await User.findByIdAndUpdate(userId, updateData, {
     returnDocument: "after",
     runValidators: true,
   });
   if (!user) {
-    throw new AppError(404, "User not found", HttpStatus.FAIL);
+    throw new AppError(404, "المستخدم غير موجود", HttpStatus.FAIL);
   }
   return user;
 };
@@ -33,7 +34,7 @@ const updateUserById = async (userId, updateData) => {
 const deleteUser = async (userId) => {
   const user = await User.findByIdAndDelete(userId);
   if (!user) {
-    throw new AppError(404, "User not found", HttpStatus.FAIL);
+    throw new AppError(404, "المستخدم غير موجود", HttpStatus.FAIL);
   }
   return user;
 };

@@ -16,7 +16,12 @@ const getUserById = asyncWrapper(async (req, res) => {
 
 // update user by id
 const updateUserById = asyncWrapper(async (req, res) => {
-  const user = await userService.updateUserById(req.params.id, req.body);
+  const user = await userService.updateUserById(
+    req.params.id,
+    req.body.email,
+    req.body.firstName,
+    req.body.lastName,
+  );
   res.status(200).json({ status: HttpStatus.SUCCESS, data: user });
 });
 

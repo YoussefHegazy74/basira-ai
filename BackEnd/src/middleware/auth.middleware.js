@@ -27,7 +27,7 @@ const protect = async (req, res, next) => {
 
     if (!token) {
       return next(
-        new AppError( 401, "You are not logged in", HttpStatusText.FAIL),
+        new AppError( 401, "أنت غير مسجل الدخول", HttpStatusText.FAIL),
       );
     }
 
@@ -36,7 +36,7 @@ const protect = async (req, res, next) => {
 
     if (!currentUser) {
       return next(
-        new AppError( 401, "User no longer exists", HttpStatusText.FAIL),
+        new AppError( 401, "المستخدم لم يعد موجودًا", HttpStatusText.FAIL),
       );
     }
 
@@ -44,7 +44,7 @@ const protect = async (req, res, next) => {
       return next(
         new AppError(
           401,
-          "User recently changed password! Please log in again.",
+          "قام المستخدم بتغيير كلمة المرور مؤخرًا! يرجى تسجيل الدخول مرة أخرى.",
           HttpStatusText.FAIL,
         ),
       );
@@ -53,7 +53,7 @@ const protect = async (req, res, next) => {
     req.user = currentUser;
     next();
   } catch (err) {
-    next(new AppError( 401, "Invalid token", HttpStatusText.FAIL));
+    next(new AppError( 401, "رمز غير صالح", HttpStatusText.FAIL));
   }
 };
 
@@ -69,7 +69,7 @@ const optionalAuth = async (req, res, next) => {
 
     if (!currentUser) {
       return next(
-        new AppError( 401, "User no longer exists", HttpStatusText.FAIL),
+        new AppError( 401, "المستخدم لم يعد موجودًا", HttpStatusText.FAIL),
       );
     }
 
@@ -77,7 +77,7 @@ const optionalAuth = async (req, res, next) => {
       return next(
         new AppError(
           401,
-          "User recently changed password! Please log in again.",
+          "قام المستخدم بتغيير كلمة المرور مؤخرًا! يرجى تسجيل الدخول مرة أخرى.",
           HttpStatusText.FAIL,
         ),
       );
@@ -86,7 +86,7 @@ const optionalAuth = async (req, res, next) => {
     req.user = currentUser;
     next();
   } catch (err) {
-    next(new AppError( 401, "Invalid token", HttpStatusText.FAIL));
+    next(new AppError( 401, "رمز غير صالح", HttpStatusText.FAIL));
   }
 };
 

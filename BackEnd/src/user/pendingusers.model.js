@@ -6,25 +6,25 @@ const pendingUserSchema = new mongoose.Schema(
   {
     firstName: {
       type: String,
-      required: [true, "First name is required"],
+      required: [true, "الاسم الأول مطلوب"],
       trim: true,
     },
     lastName: {
       type: String,
-      required: [true, "Last name is required"],
+      required: [true, "اسم العائلة مطلوب"],
       trim: true,
     },
     email: {
       type: String,
-      unique: true,
-      required: [true, "Email is required"],
+      unique: [true, "البريد الإلكتروني مستخدم بالفعل"],
+      required: [true, "البريد الإلكتروني مطلوب"],
       lowercase: true,
       trim: true,
-      validate: [validator.isEmail, "Please enter a valid email"],
+      validate: [validator.isEmail, "يرجى إدخال بريد إلكتروني صالح"],
     },
     password: {
       type: String,
-      required: [true, "Password is required"],
+      required: [true, "كلمة المرور مطلوبة"],
       validate: {
         validator: (value) =>
           validator.isStrongPassword(value, {
@@ -35,19 +35,19 @@ const pendingUserSchema = new mongoose.Schema(
             minSymbols: 1,
           }),
         message:
-          "Password must be at least 8 characters and include uppercase, lowercase, number and symbol (@, $, ...)",
+          "يجب أن تكون كلمة المرور 8 أحرف على الأقل وتتضمن حرفًا كبيرًا وحرفًا صغيرًا ورقمًا ورمزًا (@، $، ...)",
       },
       select: false,
     },
     passwordconfirm: {
       type: String,
       select: false,
-      required: [true, "Password confirmation is required"],
+      required: [true, "تأكيد كلمة المرور مطلوب"],
       validate: {
         validator: function (el) {
           return el === this.password;
         },
-        message: "Passwords do not match",
+        message: "كلمتا المرور غير متطابقتين",
       },
     },
     VerificationToken: {

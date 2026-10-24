@@ -3,7 +3,7 @@ const AppError = require("../utils/AppError.js");
 const HttpStatus = require("../utils/HttpStatusText.js");
 
 const Guest_Usage_limit = 5;
-const User_Usage_limit = 10;
+const User_Usage_limit = 1000;
 
 ////////// identify consumer
 const identify = (UserId, guestKey) => {
@@ -31,7 +31,7 @@ const consume = async (ownerKey, limit) => {
 
   if (await increment()) return;
 
-  throw new AppError(429, "Daily usage limit reached", HttpStatus.FAIL);
+  throw new AppError(429, "تم الوصول إلى الحد اليومي للاستخدام", HttpStatus.FAIL);
 };
 ////////// get usage for a user
 const getUsage = async (userId) => {
