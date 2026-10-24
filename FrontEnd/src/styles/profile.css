@@ -214,31 +214,6 @@
   margin-block-start: var(--space-3);
 }
 
-.confirm-box {
-  margin-block-start: var(--space-3);
-  padding: var(--space-4);
-  background: var(--danger-soft);
-  border: 1px solid color-mix(in srgb, var(--danger) 24%, transparent);
-  border-radius: var(--radius-md);
-}
-
-.confirm-box > p {
-  margin-block-end: var(--space-3);
-  color: var(--danger);
-  font-size: 0.8125rem;
-}
-
-.confirm-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-}
-
-.confirm-actions .btn {
-  flex: 1;
-  margin-block-start: 0;
-}
-
 .account-signout {
   width: 100%;
   margin-block-start: var(--space-3);
@@ -278,9 +253,5 @@
   .info-row {
     grid-template-columns: 1fr;
     gap: 2px;
-  }
-
-  .confirm-actions {
-    flex-direction: column-reverse;
   }
 }

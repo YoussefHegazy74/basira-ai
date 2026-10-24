@@ -3,6 +3,7 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
 import { arabicMessage, initials } from "../utils/format";
+import { ConfirmDialog } from "../components/Modal";
 import "../styles/profile.css";
 
 function Profile() {
@@ -637,45 +638,14 @@ function Profile() {
                   المتابعة.
                 </p>
 
-                {!showDeleteConfirm ? (
-                  <button
-                    type="button"
-                    className="btn btn-danger btn-sm"
-                    onClick={() => setShowDeleteConfirm(true)}
-                  >
-                    <i className="bi bi-person-x" aria-hidden="true"></i>
-                    تعطيل الحساب
-                  </button>
-                ) : (
-                  <div className="confirm-box">
-                    <p>هل تريد تعطيل حسابك الآن؟</p>
-                    <div className="confirm-actions">
-                      <button
-                        type="button"
-                        className="btn btn-danger btn-sm"
-                        onClick={handleDeactivateAccount}
-                        disabled={deactivating}
-                      >
-                        {deactivating ? (
-                          <>
-                            <span className="spinner" aria-hidden="true"></span>
-                            جارٍ التعطيل…
-                          </>
-                        ) : (
-                          "نعم، عطّل الحساب"
-                        )}
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-secondary btn-sm"
-                        onClick={() => setShowDeleteConfirm(false)}
-                        disabled={deactivating}
-                      >
-                        إلغاء
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <button
+                  type="button"
+                  className="btn btn-danger btn-sm"
+                  onClick={() => setShowDeleteConfirm(true)}
+                >
+                  <i className="bi bi-person-x" aria-hidden="true"></i>
+                  تعطيل الحساب
+                </button>
               </div>
             </section>
 
@@ -723,6 +693,22 @@ function Profile() {
           </aside>
         </div>
       </div>
+
+      {showDeleteConfirm ? (
+        <ConfirmDialog
+          title="تعطيل الحساب؟"
+          description="لن تتمكن من استخدام حسابك بعد تعطيله، وسيتم تسجيل خروجك. لا يمكن التراجع عن هذا الإجراء بنفسك."
+          confirmLabel={deactivating ? "جارٍ التعطيل…" : "تعطيل الحساب"}
+          cancelLabel="إلغاء"
+          onConfirm={handleDeactivateAccount}
+          onClose={() => {
+            if (!deactivating) setShowDeleteConfirm(false);
+          }}
+          busy={deactivating}
+          tone="danger"
+          icon="bi-person-x"
+        />
+      ) : null}
     </main>
   );
 }
