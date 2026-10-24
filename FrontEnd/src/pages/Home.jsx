@@ -106,13 +106,14 @@ function Home() {
               </div>
 
               <p className="demo-question">
-                كيف أتحقق من صحة معلومة قبل أن أعتمد عليها؟
+                ما تفسير قوله تعالى: ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾؟
               </p>
 
               <div className="demo-answer">
                 <strong>بصيرة</strong>
-                لا تعتمد على الإجابة وحدها. اقرأ المصدر، وقارن بين أكثر من
-                مرجع، ولاحظ سياق النص قبل أن تصل إلى نتيجة.
+                الآية تبشّر المؤمن بأن مع العسر يسرًا، وتدعوه إلى الصبر
+                والرجاء. يعرض لك بصيرة التفسير والسياق من المصادر المتاحة،
+                ويمكنك الرجوع إليها.
               </div>
 
               <div className="demo-source">
@@ -121,13 +122,13 @@ function Home() {
                 </span>
                 <span className="demo-source-copy">
                   <strong>المصدر</strong>
-                  <span>مرجع مرتبط بالإجابة</span>
+                  <span>تفسير — سورة الشرح</span>
                 </span>
               </div>
 
               <p className="demo-card-foot">
                 <i className="bi bi-info-circle" aria-hidden="true"></i>
-                مثال يوضح شكل الإجابة، وليس إجابة فعلية.
+                مثال يوضح شكل الإجابة من المصادر، وليس إجابة فعلية.
               </p>
             </div>
           </div>
