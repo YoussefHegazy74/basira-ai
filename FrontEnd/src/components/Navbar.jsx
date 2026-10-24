@@ -8,7 +8,7 @@ const TOOLS = [
   {
     icon: "bi-chat-square-text",
     title: "المساعد المعرفي",
-    description: "اسأل بالعربية وراجع المصادر",
+    description: "اسأل في المسائل الشرعية",
     to: "/chat",
   },
   {
