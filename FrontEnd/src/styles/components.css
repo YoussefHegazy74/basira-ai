@@ -83,7 +83,7 @@
 }
 
 .btn-sm {
-  min-height: 40px;
+  min-height: 44px;
   padding: 7px 12px;
   border-radius: var(--radius-sm);
   font-size: 0.8125rem;
@@ -931,6 +931,12 @@
 
 .modal-body {
   margin-block-start: var(--space-4);
+}
+
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
 }
 
 .modal-actions {
