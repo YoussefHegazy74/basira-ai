@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import api from "../services/api";
 import { useAuth } from "../context/AuthContext";
+import { useChatNavigation } from "../context/ChatNavigationContext";
 import {
   buildChatHistory,
   makeClientMessageId,
@@ -12,21 +13,19 @@ import {
   writeActiveConversation,
   writeFailedSubmission,
 } from "../utils/chatHistory";
-import { citationSegments } from "../utils/citations";
+import { citationSegments, formatSourceLabel } from "../utils/citations";
 import { arabicMessage, formatNumber } from "../utils/format";
 import Modal, { ConfirmDialog } from "../components/Modal";
 import "../styles/chat.css";
 
-function conversationTitle(item) {
-  return item?.title || "محادثة جديدة";
+function sourceLabelsFor(item) {
+  return (Array.isArray(item?.sources) ? item.sources : [])
+    .map(formatSourceLabel)
+    .filter(Boolean);
 }
 
-function conversationCountLabel(count) {
-  if (count === 0) return "لا محادثات محفوظة";
-  if (count === 1) return "محادثة واحدة";
-  if (count === 2) return "محادثتان";
-  if (count <= 10) return `${formatNumber(count)} محادثات`;
-  return `${formatNumber(count)} محادثة`;
+function conversationTitle(item) {
+  return item?.title || "محادثة جديدة";
 }
 
 function fallbackCopy(text) {
@@ -59,7 +58,7 @@ function Chat() {
   const [editingConversationId, setEditingConversationId] = useState(null);
   const [deletingConversationId, setDeletingConversationId] = useState(null);
   const [failedSubmission, setFailedSubmission] = useState(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [feedback, setFeedback] = useState({});
   const [copiedId, setCopiedId] = useState("");
   const [showScrollDown, setShowScrollDown] = useState(false);
 
@@ -74,9 +73,13 @@ function Chat() {
   const jumpToBottomRef = useRef(false);
   const restoredConversationRef = useRef(false);
   const copyTimerRef = useRef(null);
+  const newChatTokenRef = useRef(null);
 
+  const location = useLocation();
+  const { setHistory, setActions } = useChatNavigation();
   const userIdentity = user?.id || user?._id || user?.email || null;
   const maxLength = user ? 500 : 250;
+  const hasMessages = messages.length > 0;
 
   // الحفاظ على موضع الكتابة أثناء نمو الحقل.
   useEffect(
@@ -85,10 +88,10 @@ function Chat() {
       if (!field) return;
 
       field.style.height = "auto";
-      const nextHeight = Math.min(field.scrollHeight, 168);
+      const nextHeight = Math.min(field.scrollHeight, 176);
       field.style.height = `${nextHeight}px`;
       field.style.overflowY =
-        field.scrollHeight > 168 ? "auto" : "hidden";
+        field.scrollHeight > 176 ? "auto" : "hidden";
     },
     [message]
   );
@@ -169,7 +172,6 @@ function Chat() {
         setConversationId(null);
         setMessages([]);
         setFailedSubmission(null);
-        setHistoryOpen(false);
       }
     },
     [authLoading, user, loadConversations]
@@ -187,6 +189,7 @@ function Chat() {
   useEffect(
     function () {
       if (authLoading || !user) return;
+      if (location.state?.newChat) return;
       if (restoredConversationRef.current || conversationId) return;
 
       restoredConversationRef.current = true;
@@ -263,7 +266,6 @@ function Chat() {
     }
 
     setError("");
-    setHistoryOpen(false);
     setIsOpeningConversation(true);
 
     try {
@@ -689,8 +691,7 @@ function Chat() {
     });
   }
 
-  async function handleCopy(item) {
-    const text = item?.text || "";
+  async function copyText(text, key) {
     if (!text) return;
 
     try {
@@ -700,7 +701,7 @@ function Chat() {
         fallbackCopy(text);
       }
 
-      setCopiedId(item.id);
+      setCopiedId(key);
       if (copyTimerRef.current) {
         window.clearTimeout(copyTimerRef.current);
       }
@@ -708,8 +709,30 @@ function Chat() {
         setCopiedId("");
       }, 2000);
     } catch {
-      setError("تعذّر نسخ الرسالة من المتصفح. حدّد النص وانسخه يدويًا.");
+      setError("تعذّر النسخ من المتصفح. حدّد النص وانسخه يدويًا.");
     }
+  }
+
+  function handleCopy(item) {
+    return copyText(item?.text || "", `message:${item.id}`);
+  }
+
+  function handleCopySources(item) {
+    return copyText(sourceLabelsFor(item).join("\n"), `sources:${item.id}`);
+  }
+
+  function handleFeedback(item, value) {
+    setFeedback(function (current) {
+      return {
+        ...current,
+        [item.id]: current[item.id] === value ? 0 : value,
+      };
+    });
+  }
+
+  function closeMessageMenu(event) {
+    const menu = event.currentTarget.closest("details");
+    if (menu) menu.open = false;
   }
 
   // بدء محادثة جديدة
@@ -728,7 +751,6 @@ function Chat() {
     setError("");
     setConversationId(null);
     setFailedSubmission(null);
-    setHistoryOpen(false);
     setShowScrollDown(false);
     stickToBottomRef.current = true;
     writeActiveConversation(user, null);
@@ -737,330 +759,187 @@ function Chat() {
     textareaRef.current?.focus();
   }
 
-  function chooseSuggestion(suggestion) {
-    if (isLoading || isOpeningConversation) return;
-    setMessage(suggestion);
-    setError("");
-    textareaRef.current?.focus();
-  }
+  useEffect(
+    function () {
+      setHistory({
+        conversations,
+        activeId: conversationId,
+        loaded: historyLoaded,
+        busy:
+          isLoading ||
+          isOpeningConversation ||
+          Boolean(editingConversationId) ||
+          Boolean(deletingConversationId),
+      });
+    },
+    [
+      conversations,
+      conversationId,
+      historyLoaded,
+      isLoading,
+      isOpeningConversation,
+      editingConversationId,
+      deletingConversationId,
+      setHistory,
+    ]
+  );
 
-  const statusText = isOpeningConversation
-    ? "جارٍ تحميل المحادثة…"
-    : isLoading
-      ? "بصيرة تكتب الآن…"
-      : "جاهز للمحادثة";
+  useEffect(function () {
+    setActions({
+      newChat: handleNewChat,
+      open: openConversation,
+      rename: openRenameDialog,
+      remove: openDeleteDialog,
+    });
+  });
 
-  const busyHistory =
-    isLoading ||
-    isOpeningConversation ||
-    Boolean(editingConversationId) ||
-    Boolean(deletingConversationId);
+  useEffect(
+    function () {
+      const token = location.state?.newChat;
+      if (!token || token === newChatTokenRef.current) return;
+      newChatTokenRef.current = token;
+      handleNewChat();
+    },
+    [location.state, handleNewChat]
+  );
 
   const deleteBusy =
     Boolean(deleteTarget) &&
     String(deletingConversationId) === String(deleteTarget?._id);
 
+  function renderMessageText(item) {
+    return citationSegments(item.text, item.sources).map(function (
+      segment,
+      index
+    ) {
+      if (segment.type === "citation") {
+        return (
+          <span
+            className="inline-citation"
+            key={`${item.id}-citation-${index}`}
+          >
+            {segment.text}
+          </span>
+        );
+      }
+
+      return (
+        <span key={`${item.id}-text-${index}`}>{segment.text}</span>
+      );
+    });
+  }
+
+  const composer = (
+    <form className="chat-composer" onSubmit={handleSubmit}>
+      <div className={`composer-pill${message.trim() ? " has-text" : ""}`}>
+        <button
+          type="button"
+          className="composer-icon"
+          disabled
+          aria-label="إرفاق ملف، غير متاح بعد"
+          title="إرفاق ملف، غير متاح بعد"
+        >
+          <i className="bi bi-plus-lg" aria-hidden="true"></i>
+        </button>
+
+        <label className="sr-only" htmlFor="chat-message">
+          رسالتك
+        </label>
+        <textarea
+          id="chat-message"
+          ref={textareaRef}
+          value={message}
+          onChange={function (event) {
+            setMessage(event.target.value);
+            if (error) setError("");
+            if (failedSubmission) {
+              setFailedSubmission(null);
+              writeFailedSubmission(user, null);
+            }
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder="اسأل بصيرة…"
+          rows={1}
+          maxLength={maxLength}
+          dir="auto"
+          disabled={isOpeningConversation}
+        />
+
+        <div className="composer-actions">
+          <button
+            type="button"
+            className="composer-icon"
+            disabled
+            aria-label="الإدخال الصوتي، غير متاح بعد"
+            title="الإدخال الصوتي، غير متاح بعد"
+          >
+            <i className="bi bi-mic" aria-hidden="true"></i>
+          </button>
+
+          <button
+            className={`composer-send${message.trim() ? " is-ready" : ""}`}
+            type="submit"
+            disabled={!message.trim() || isLoading || isOpeningConversation}
+            aria-busy={isLoading}
+            aria-label={isLoading ? "جارٍ الإرسال" : "إرسال الرسالة"}
+            title={isLoading ? "جارٍ الإرسال" : "إرسال الرسالة"}
+          >
+            {isLoading ? (
+              <span className="send-dot" aria-hidden="true"></span>
+            ) : (
+              <i className="bi bi-arrow-up" aria-hidden="true"></i>
+            )}
+          </button>
+        </div>
+      </div>
+    </form>
+  );
+
   return (
-    <main className="page chat-page">
-      <div className="container chat-shell">
-        <header className="chat-intro">
-          <div>
-            <p className="eyebrow">المحادثة</p>
-            <h1>المساعد المعرفي</h1>
-            <p>
-              اسأل في مسألة شرعية، وتابع الإجابة بهدوء. يجيب بصيرة من
-              مصادره المتاحة، ويوضح لك إذا لم يجد الجواب فيها.
-            </p>
-          </div>
+    <main className="chat-app" aria-label="المحادثة" tabIndex={-1}>
+      <h1 className="sr-only">المحادثة</h1>
+      <div
+        className={`chat-stage ${hasMessages ? "has-thread" : "is-empty"}`}
+      >
+        {hasMessages ? (
+          <div
+            className="chat-thread"
+            ref={messagesRef}
+            onScroll={handleMessagesScroll}
+            aria-label="الرسائل"
+          >
+            <div className="chat-thread-inner">
+              <div className="message-list">
+                {messages.map(function (item) {
+                  const labels = sourceLabelsFor(item);
+                  const isCopied = copiedId === `message:${item.id}`;
+                  const isSourcesCopied =
+                    copiedId === `sources:${item.id}`;
+                  const rating = feedback[item.id] || 0;
 
-          {!authLoading && !user ? (
-            <p className="chat-guest-note">
-              <i className="bi bi-info-circle" aria-hidden="true"></i>
-              <span>
-                أنت تستخدم بصيرة كزائر.{" "}
-                <Link to="/signin">سجّل الدخول</Link> لحفظ محادثاتك.
-              </span>
-            </p>
-          ) : null}
-        </header>
-
-        <div className={`chat-layout ${user ? "" : "is-guest"}`}>
-          {user ? (
-            <aside
-              className={`chat-sidebar ${historyOpen ? "is-open" : ""}`}
-              id="chat-history"
-              aria-label="سجل المحادثات"
-            >
-              <div className="chat-sidebar-heading">
-                <div>
-                  <h2>سجل المحادثات</h2>
-                  <p>{conversationCountLabel(conversations.length)}</p>
-                </div>
-                <button
-                  className="icon-btn chat-history-close"
-                  type="button"
-                  onClick={() => setHistoryOpen(false)}
-                  aria-label="إغلاق سجل المحادثات"
-                >
-                  <i className="bi bi-x-lg" aria-hidden="true"></i>
-                </button>
-              </div>
-
-              <button
-                className="btn btn-secondary chat-new-button"
-                type="button"
-                onClick={handleNewChat}
-                disabled={busyHistory}
-              >
-                <i className="bi bi-plus-lg" aria-hidden="true"></i>
-                محادثة جديدة
-              </button>
-
-              <div className="chat-sidebar-list">
-                {!historyLoaded ? (
-                  <div
-                    className="chat-history-skeleton"
-                    aria-hidden="true"
-                  >
-                    <span className="skeleton"></span>
-                    <span className="skeleton"></span>
-                    <span className="skeleton"></span>
-                  </div>
-                ) : conversations.length === 0 ? (
-                  <div className="chat-sidebar-empty">
-                    <i
-                      className="bi bi-chat-square-text"
-                      aria-hidden="true"
-                    ></i>
-                    <p>لا توجد محادثات محفوظة بعد.</p>
-                    <span>ستظهر هنا بعد أول محادثة.</span>
-                  </div>
-                ) : (
-                  conversations.map(function (item) {
-                    const isActive =
-                      String(conversationId) === String(item._id);
-                    const isRenaming =
-                      String(editingConversationId) === String(item._id);
-                    const isDeleting =
-                      String(deletingConversationId) === String(item._id);
-
+                  if (item.sender === "user") {
                     return (
-                      <div
-                        className={`chat-history-row ${
-                          isActive ? "active" : ""
-                        }`}
-                        key={item._id}
-                      >
-                        <button
-                          type="button"
-                          className={`chat-history-item ${
-                            isActive ? "active" : ""
-                          }`}
-                          onClick={function () {
-                            openConversation(item);
-                          }}
-                          disabled={busyHistory}
-                          aria-current={isActive ? "true" : undefined}
-                          title={conversationTitle(item)}
-                        >
-                          <i
-                            className="bi bi-chat-left-text"
-                            aria-hidden="true"
-                          ></i>
-                          <span>{conversationTitle(item)}</span>
-                        </button>
-
-                        <div className="chat-history-actions">
-                          <button
-                            type="button"
-                            className="chat-history-action"
-                            title="تغيير اسم المحادثة"
-                            aria-label={`تغيير اسم المحادثة: ${conversationTitle(
-                              item
-                            )}`}
-                            onClick={function () {
-                              openRenameDialog(item);
-                            }}
-                            disabled={busyHistory}
-                          >
-                            <i
-                              className={
-                                isRenaming
-                                  ? "bi bi-hourglass-split"
-                                  : "bi bi-pencil-square"
-                              }
-                              aria-hidden="true"
-                            ></i>
-                          </button>
-
-                          <button
-                            type="button"
-                            className="chat-history-action danger"
-                            title="حذف المحادثة"
-                            aria-label={`حذف المحادثة: ${conversationTitle(
-                              item
-                            )}`}
-                            onClick={function () {
-                              openDeleteDialog(item);
-                            }}
-                            disabled={busyHistory}
-                          >
-                            <i
-                              className={
-                                isDeleting
-                                  ? "bi bi-hourglass-split"
-                                  : "bi bi-trash3"
-                              }
-                              aria-hidden="true"
-                            ></i>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </aside>
-          ) : null}
-
-          <section className="chat-workspace" aria-label="المحادثة">
-            <header className="chat-header">
-              <div className="chat-header-info">
-                <span className="chat-avatar" aria-hidden="true">
-                  <i className="bi bi-eye"></i>
-                </span>
-
-                <div className="chat-header-copy">
-                  <h2>بصيرة</h2>
-                  <span className="chat-status">
-                    <span
-                      className={`status-dot ${
-                        isLoading || isOpeningConversation ? "busy" : ""
-                      }`}
-                    ></span>
-                    {statusText}
-                  </span>
-                </div>
-              </div>
-
-              <div className="chat-header-actions">
-                {user ? (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm chat-history-toggle"
-                    onClick={() => setHistoryOpen((current) => !current)}
-                    aria-expanded={historyOpen}
-                    aria-controls="chat-history"
-                    aria-label="عرض سجل المحادثات"
-                  >
-                    <i className="bi bi-clock-history" aria-hidden="true"></i>
-                    <span className="btn-label">السجل</span>
-                  </button>
-                ) : null}
-
-                <button
-                  type="button"
-                  className="btn btn-secondary btn-sm"
-                  onClick={handleNewChat}
-                  disabled={busyHistory}
-                  aria-label="بدء محادثة جديدة"
-                >
-                  <i className="bi bi-plus-lg" aria-hidden="true"></i>
-                  <span className="btn-label">محادثة جديدة</span>
-                </button>
-              </div>
-            </header>
-
-            <div
-              className="chat-messages"
-              ref={messagesRef}
-              onScroll={handleMessagesScroll}
-              aria-label="الرسائل"
-            >
-              {messages.length === 0 ? (
-                isOpeningConversation ? (
-                  <div className="chat-loading-state" aria-live="polite">
-                    <span className="spinner" aria-hidden="true"></span>
-                    <p>جارٍ تحميل المحادثة…</p>
-                  </div>
-                ) : (
-                  <div className="chat-empty-state">
-                    <span className="chat-empty-icon" aria-hidden="true">
-                      <i className="bi bi-chat-quote"></i>
-                    </span>
-                    <h3>اسأل في مسألة شرعية</h3>
-                    <p>
-                      اكتب سؤالك الشرعي في الأسفل. يجيب بصيرة من المصادر
-                      المتاحة فقط، ويمكنك البدء بأحد الأسئلة المقترحة.
-                    </p>
-
-                    <div className="chat-suggestions">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          chooseSuggestion("ما حكم صلاة المسافر؟")
-                        }
-                      >
-                        ما حكم صلاة المسافر؟
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          chooseSuggestion(
-                            "ما تفسير قوله تعالى: إن مع العسر يسرا؟"
-                          )
-                        }
-                      >
-                        ما تفسير آية «إن مع العسر يسرا»؟
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          chooseSuggestion(
-                            "ما الفرق بين الحديث الصحيح والضعيف؟"
-                          )
-                        }
-                      >
-                        ما الفرق بين الحديث الصحيح والضعيف؟
-                      </button>
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className="message-list">
-                  {messages.map(function (item) {
-                    const isCopied = copiedId === item.id;
-
-                    return (
-                      <div
-                        className={`message-row ${item.sender}`}
-                        key={item.id}
-                      >
-                        {item.sender === "assistant" ? (
-                          <span
-                            className="message-avatar"
-                            aria-hidden="true"
-                          >
-                            <i className="bi bi-eye"></i>
-                          </span>
-                        ) : null}
-
-                        <div className="message-stack">
-                          <div className="message-meta">
-                            <span className="message-sender">
-                              {item.sender === "user" ? "أنت" : "بصيرة"}
-                            </span>
+                      <article className="message-row user" key={item.id}>
+                        <div className="user-message">
+                          <p className="user-text" dir="auto">
+                            {renderMessageText(item)}
+                          </p>
+                          <div className="user-message-foot">
                             <button
                               type="button"
-                              className={`message-copy ${
-                                isCopied ? "is-copied" : ""
+                              className={`message-action${
+                                isCopied ? " is-copied" : ""
                               }`}
                               onClick={() => handleCopy(item)}
-                              title={
-                                isCopied ? "تم نسخ الرسالة" : "نسخ الرسالة"
-                              }
                               aria-label={
-                                isCopied ? "تم نسخ الرسالة" : "نسخ الرسالة"
+                                isCopied
+                                  ? "تم نسخ الرسالة"
+                                  : "نسخ الرسالة"
+                              }
+                              title={
+                                isCopied
+                                  ? "تم نسخ الرسالة"
+                                  : "نسخ الرسالة"
                               }
                             >
                               <i
@@ -1073,203 +952,246 @@ function Chat() {
                               ></i>
                             </button>
                           </div>
-
-                          <div className="message-bubble">
-                            <p>
-                              {citationSegments(
-                                item.text,
-                                item.sources
-                              ).map(function (segment, index) {
-                                if (segment.type === "citation") {
-                                  return (
-                                    <span
-                                      className="inline-citation"
-                                      key={`${item.id}-citation-${index}`}
-                                    >
-                                      {segment.text}
-                                    </span>
-                                  );
-                                }
-                                return (
-                                  <span
-                                    key={`${item.id}-text-${index}`}
-                                  >
-                                    {segment.text}
-                                  </span>
-                                );
-                              })}
-                            </p>
-                          </div>
                         </div>
-                      </div>
+                      </article>
                     );
-                  })}
+                  }
 
-                  {isLoading ? (
-                    <div className="message-row assistant typing-row">
-                      <span className="message-avatar" aria-hidden="true">
-                        <i className="bi bi-eye"></i>
-                      </span>
+                  return (
+                    <article
+                      className="message-row assistant"
+                      key={item.id}
+                    >
+                      <div className="assistant-message">
+                        <p className="assistant-text" dir="auto">
+                          {renderMessageText(item)}
+                        </p>
 
-                      <div className="message-stack">
-                        <span className="message-sender">بصيرة</span>
-                        <div
-                          className="message-bubble typing-bubble"
-                          role="status"
-                        >
-                          <span
-                            className="typing-dots"
-                            aria-hidden="true"
+                        {labels.length ? (
+                          <div
+                            className="message-sources"
+                            aria-label="مصادر الإجابة"
                           >
-                            <span></span>
-                            <span></span>
-                            <span></span>
-                          </span>
-                          <span className="sr-only">
-                            بصيرة تكتب الآن…
-                          </span>
+                            <div className="source-list">
+                              {labels.map((label, index) => (
+                                <span
+                                  className="source-chip"
+                                  key={`${item.id}-source-${index}`}
+                                >
+                                  <i
+                                    className="bi bi-journal-text"
+                                    aria-hidden="true"
+                                  ></i>
+                                  {label}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div
+                          className="message-actions"
+                          role="group"
+                          aria-label="إجراءات الرسالة"
+                        >
+                          <button
+                            type="button"
+                            className={`message-action${
+                              isCopied ? " is-copied" : ""
+                            }`}
+                            onClick={() => handleCopy(item)}
+                            aria-label={
+                              isCopied ? "تم نسخ الإجابة" : "نسخ الإجابة"
+                            }
+                            title={
+                              isCopied ? "تم نسخ الإجابة" : "نسخ الإجابة"
+                            }
+                          >
+                            <i
+                              className={
+                                isCopied ? "bi bi-check2" : "bi bi-copy"
+                              }
+                              aria-hidden="true"
+                            ></i>
+                          </button>
+
+                          <button
+                            type="button"
+                            className="message-action is-disabled"
+                            disabled
+                            aria-label="إعادة التوليد غير متاحة في هذه النسخة"
+                            title="إعادة التوليد غير متاحة في هذه النسخة"
+                          >
+                            <i
+                              className="bi bi-arrow-clockwise"
+                              aria-hidden="true"
+                            ></i>
+                          </button>
+
+                          <button
+                            type="button"
+                            className={`message-action${
+                              rating === 1 ? " is-active" : ""
+                            }`}
+                            onClick={() => handleFeedback(item, 1)}
+                            aria-pressed={rating === 1}
+                            aria-label="إعجاب بالإجابة"
+                            title="إعجاب"
+                          >
+                            <i
+                              className="bi bi-hand-thumbs-up"
+                              aria-hidden="true"
+                            ></i>
+                          </button>
+
+                          <button
+                            type="button"
+                            className={`message-action${
+                              rating === -1 ? " is-active" : ""
+                            }`}
+                            onClick={() => handleFeedback(item, -1)}
+                            aria-pressed={rating === -1}
+                            aria-label="عدم الإعجاب بالإجابة"
+                            title="عدم إعجاب"
+                          >
+                            <i
+                              className="bi bi-hand-thumbs-down"
+                              aria-hidden="true"
+                            ></i>
+                          </button>
+
+                          <details className="message-more">
+                            <summary
+                              className="message-action"
+                              aria-label="المزيد من الخيارات"
+                              title="المزيد"
+                            >
+                              <i
+                                className="bi bi-three-dots"
+                                aria-hidden="true"
+                              ></i>
+                            </summary>
+                            <div className="message-more-menu">
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  handleCopy(item);
+                                  closeMessageMenu(event);
+                                }}
+                              >
+                                <i
+                                  className="bi bi-copy"
+                                  aria-hidden="true"
+                                ></i>
+                                نسخ النص
+                              </button>
+                              {labels.length ? (
+                                <button
+                                  type="button"
+                                  onClick={(event) => {
+                                    handleCopySources(item);
+                                    closeMessageMenu(event);
+                                  }}
+                                >
+                                  <i
+                                    className="bi bi-journal-text"
+                                    aria-hidden="true"
+                                  ></i>
+                                  {isSourcesCopied
+                                    ? "تم نسخ المصادر"
+                                    : "نسخ المصادر"}
+                                </button>
+                              ) : null}
+                            </div>
+                          </details>
                         </div>
                       </div>
+                    </article>
+                  );
+                })}
+
+                {isLoading ? (
+                  <article className="message-row assistant typing-row">
+                    <div className="typing-state" role="status">
+                      <span className="typing-dots" aria-hidden="true">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                      </span>
+                      <span className="sr-only">بصيرة تكتب الآن…</span>
                     </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-
-            {showScrollDown ? (
-              <button
-                type="button"
-                className="chat-scroll-down"
-                onClick={scrollToLatest}
-                aria-label="الانتقال إلى آخر الرسائل"
-                title="آخر الرسائل"
-              >
-                <i className="bi bi-arrow-down" aria-hidden="true"></i>
-              </button>
-            ) : null}
-
-            {error || failedSubmission ? (
-              <div className="chat-alert" role="alert">
-                <i
-                  className="bi bi-exclamation-circle"
-                  aria-hidden="true"
-                ></i>
-                <div className="chat-alert-copy">
-                  <strong>
-                    {failedSubmission
-                      ? "لم يكتمل الرد السابق"
-                      : "تعذّر إكمال الطلب"}
-                  </strong>
-                  <p>
-                    {error ||
-                      "يمكنك إعادة المحاولة، أو كتابة سؤالك من جديد."}
-                  </p>
-                </div>
-                {failedSubmission ? (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={retryFailedSubmission}
-                    disabled={isLoading || isOpeningConversation}
-                  >
-                    {isLoading ? (
-                      <>
-                        <span
-                          className="spinner"
-                          aria-hidden="true"
-                        ></span>
-                        جارٍ الإرسال…
-                      </>
-                    ) : (
-                      <>
-                        <i
-                          className="bi bi-arrow-clockwise"
-                          aria-hidden="true"
-                        ></i>
-                        إعادة المحاولة
-                      </>
-                    )}
-                  </button>
+                  </article>
                 ) : null}
               </div>
+            </div>
+          </div>
+        ) : isOpeningConversation ? (
+          <div className="chat-loading" aria-live="polite">
+            <span className="typing-dots" aria-hidden="true">
+              <span></span>
+              <span></span>
+              <span></span>
+            </span>
+            <span className="sr-only">جارٍ تحميل المحادثة…</span>
+          </div>
+        ) : null}
+
+        {error || failedSubmission ? (
+          <div className="chat-alert" role="alert">
+            <i
+              className="bi bi-exclamation-circle"
+              aria-hidden="true"
+            ></i>
+            <div className="chat-alert-copy">
+              <strong>
+                {failedSubmission
+                  ? "لم يكتمل الرد السابق"
+                  : "تعذّر إكمال الطلب"}
+              </strong>
+              <p>
+                {error ||
+                  "يمكنك إعادة المحاولة، أو كتابة سؤالك من جديد."}
+              </p>
+            </div>
+            {failedSubmission ? (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={retryFailedSubmission}
+                disabled={isLoading || isOpeningConversation}
+              >
+                {isLoading ? (
+                  <>
+                    <span className="send-dot" aria-hidden="true"></span>
+                    جارٍ الإرسال…
+                  </>
+                ) : (
+                  <>
+                    <i
+                      className="bi bi-arrow-clockwise"
+                      aria-hidden="true"
+                    ></i>
+                    إعادة المحاولة
+                  </>
+                )}
+              </button>
             ) : null}
+          </div>
+        ) : null}
 
-            <form className="chat-composer" onSubmit={handleSubmit}>
-              <div className="composer-box">
-                <label className="sr-only" htmlFor="chat-message">
-                  رسالتك
-                </label>
+        <div className="chat-composer-dock">{composer}</div>
 
-                <textarea
-                  id="chat-message"
-                  ref={textareaRef}
-                  value={message}
-                  onChange={function (event) {
-                    setMessage(event.target.value);
-                    if (error) setError("");
-                    if (failedSubmission) {
-                      setFailedSubmission(null);
-                      writeFailedSubmission(user, null);
-                    }
-                  }}
-                  onKeyDown={handleKeyDown}
-                  placeholder="اكتب سؤالك هنا…"
-                  rows={1}
-                  maxLength={maxLength}
-                  disabled={isOpeningConversation}
-                  aria-describedby="chat-composer-hint"
-                />
-
-                <div className="composer-footer">
-                  <span className="composer-meta">
-                    {message.length > 0 ? (
-                      <span
-                        className={
-                          message.length >= maxLength
-                            ? "composer-count limit"
-                            : "composer-count"
-                        }
-                      >
-                        {formatNumber(message.length)} /{" "}
-                        {formatNumber(maxLength)}
-                      </span>
-                    ) : null}
-                    <span className="composer-hint" id="chat-composer-hint">
-                      مفتاح الإدخال يرسل، ومعه مفتاح التبديل يضيف سطرًا.
-                    </span>
-                  </span>
-
-                  <button
-                    className="btn btn-primary send-message-button"
-                    type="submit"
-                    disabled={
-                      !message.trim() ||
-                      isLoading ||
-                      isOpeningConversation
-                    }
-                    aria-busy={isLoading}
-                    aria-label={isLoading ? "جارٍ الإرسال" : "إرسال الرسالة"}
-                  >
-                    {isLoading ? (
-                      <>
-                        <span className="spinner" aria-hidden="true"></span>
-                        <span className="send-label">جارٍ الإرسال…</span>
-                      </>
-                    ) : (
-                      <>
-                        <span className="send-label">إرسال</span>
-                        <i
-                          className="bi bi-send"
-                          aria-hidden="true"
-                        ></i>
-                      </>
-                    )}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </section>
-        </div>
+        {hasMessages && showScrollDown ? (
+          <button
+            type="button"
+            className="chat-scroll-down"
+            onClick={scrollToLatest}
+            aria-label="الانتقال إلى آخر الرسائل"
+            title="آخر الرسائل"
+          >
+            <i className="bi bi-arrow-down" aria-hidden="true"></i>
+          </button>
+        ) : null}
       </div>
 
       {renameTarget ? (
