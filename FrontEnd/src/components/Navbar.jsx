@@ -178,6 +178,7 @@ function Navbar() {
 
   function handleNewChat() {
     setMobileOpen(false);
+    setSearchQuery("");
     navigate("/chat", { state: { newChat: Date.now() } });
   }
 
