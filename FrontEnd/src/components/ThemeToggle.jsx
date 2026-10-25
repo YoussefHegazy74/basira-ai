@@ -25,9 +25,11 @@ function applyTheme(theme, animate = false) {
   root.dataset.theme = theme;
   root.style.colorScheme = theme;
   const meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) {
-    meta.setAttribute("content", theme === "dark" ? "#151a17" : "#f7f5ef");
-  }
+  const background = window
+    .getComputedStyle(root)
+    .getPropertyValue("--background")
+    .trim();
+  if (meta && background) meta.setAttribute("content", background);
 }
 
 function ThemeToggle() {

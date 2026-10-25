@@ -329,7 +329,7 @@
   height: 34px;
   place-items: center;
   margin-block-end: var(--space-5);
-  color: var(--accent);
+  color: var(--accent-hover);
   background: var(--accent-soft);
   border-radius: 50%;
   font-size: 0.75rem;

@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BasiraLogo from "./BasiraLogo";
 import { formatYear } from "../utils/format";
 
 function Footer() {
@@ -7,13 +8,7 @@ function Footer() {
       <div className="container footer-grid">
         <div className="footer-about">
           <Link className="brand" to="/" aria-label="بصيرة، الصفحة الرئيسية">
-            <span className="brand-mark" aria-hidden="true">
-              <i className="bi bi-eye"></i>
-            </span>
-            <span className="brand-copy">
-              <strong>بصيرة</strong>
-              <span>معرفة واعية</span>
-            </span>
+            <BasiraLogo size="md" />
           </Link>
           <p>
             مساحة عربية هادئة للبحث عن المعرفة وفهمها والتحقق منها، دون

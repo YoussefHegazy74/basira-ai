@@ -1,13 +1,7 @@
 /* Verification and tafsir tools */
 
 .tool-page {
-  background:
-    linear-gradient(
-      to bottom,
-      var(--surface-muted) 0,
-      var(--surface-muted) 240px,
-      var(--background) 240px
-    );
+  background: var(--background);
 }
 
 .tool-shell {
@@ -139,7 +133,7 @@
   width: 28px;
   height: 28px;
   place-items: center;
-  color: var(--accent);
+  color: var(--accent-hover);
   background: var(--accent-soft);
   border-radius: 50%;
   content: counter(guide, arabic-indic);

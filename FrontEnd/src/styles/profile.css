@@ -177,7 +177,7 @@
 }
 
 .shortcut-link:hover {
-  color: var(--accent);
+  color: var(--accent-hover);
   background: var(--accent-soft);
 }
 

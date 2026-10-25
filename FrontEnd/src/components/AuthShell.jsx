@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import BasiraLogo from "./BasiraLogo";
 
 function AuthShell({
   eyebrow,
@@ -16,13 +17,7 @@ function AuthShell({
       <div className="container auth-layout">
         <aside className="auth-aside" aria-label="عن بصيرة">
           <Link className="brand auth-brand" to="/">
-            <span className="brand-mark" aria-hidden="true">
-              <i className="bi bi-eye"></i>
-            </span>
-            <span className="brand-copy">
-              <strong>بصيرة</strong>
-              <span>معرفة واعية</span>
-            </span>
+            <BasiraLogo size="md" />
           </Link>
 
           <div className="auth-aside-copy">

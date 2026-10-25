@@ -27,10 +27,6 @@
   align-self: flex-start;
 }
 
-.auth-brand .brand-mark {
-  background: var(--accent);
-}
-
 .auth-aside-copy h2 {
   max-width: 380px;
   margin-block: var(--space-3) var(--space-4);
@@ -177,7 +173,7 @@
   width: 24px;
   height: 24px;
   place-items: center;
-  color: var(--accent);
+  color: var(--accent-hover);
   background: var(--accent-soft);
   border-radius: 50%;
   font-size: 0.6875rem;
