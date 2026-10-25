@@ -24,6 +24,7 @@ import Tafsir from "./pages/Tafsir";
 import About from "./pages/About";
 import Services from "./pages/Services";
 import { AuthProvider, useAuth } from "./context/AuthContext";
+import { ChatNavigationProvider } from "./context/ChatNavigationContext";
 import { usePageMeta } from "./hooks/usePageMeta";
 import { formatNumber } from "./utils/format";
 
@@ -90,20 +91,28 @@ function ScrollAndReveal() {
   const { pathname } = useLocation();
 
   useEffect(() => {
+    const main = document.getElementById("main-content");
+    if (main) main.scrollTo({ top: 0, left: 0, behavior: "auto" });
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [pathname]);
 
   useEffect(() => {
-    const elements = Array.from(document.querySelectorAll("[data-reveal]"));
-    if (!elements.length) return undefined;
-
     const reduced = window.matchMedia?.(
       "(prefers-reduced-motion: reduce)",
     ).matches;
+    const container = document.getElementById("main-content") || document.body;
+
+    function revealAll() {
+      container
+        .querySelectorAll("[data-reveal]")
+        .forEach((element) => element.classList.add("is-visible"));
+    }
 
     if (reduced || !("IntersectionObserver" in window)) {
-      elements.forEach((element) => element.classList.add("is-visible"));
-      return undefined;
+      revealAll();
+      const mutation = new MutationObserver(revealAll);
+      mutation.observe(container, { childList: true, subtree: true });
+      return () => mutation.disconnect();
     }
 
     const observer = new IntersectionObserver(
@@ -118,68 +127,91 @@ function ScrollAndReveal() {
       { rootMargin: "0px 0px -6% 0px", threshold: 0.08 },
     );
 
-    elements.forEach((element) => observer.observe(element));
-    return () => observer.disconnect();
+    function observePending() {
+      container
+        .querySelectorAll("[data-reveal]:not(.is-visible)")
+        .forEach((element) => observer.observe(element));
+    }
+
+    observePending();
+    const mutation = new MutationObserver(observePending);
+    mutation.observe(container, { childList: true, subtree: true });
+
+    return () => {
+      observer.disconnect();
+      mutation.disconnect();
+    };
   }, [pathname]);
 
   return null;
 }
 
 function AppLayout() {
+  const { pathname } = useLocation();
+  const isChat = pathname === "/chat";
+
   usePageMeta();
 
   return (
     <>
       <a className="skip-link" href="#main-content">
-        انتقل إلى المحتوى
+        {isChat ? "انتقل إلى المحادثة" : "انتقل إلى المحتوى"}
       </a>
       <ScrollAndReveal />
-      <Navbar />
-      <div className="app-content" id="main-content" tabIndex={-1}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-          <Route path="/about" element={<About />} />
-          <Route path="/services" element={<Services />} />
+      <div className="app-shell">
+        <Navbar />
+        <div
+          className={`app-main${isChat ? " app-main-chat" : ""}`}
+          id="main-content"
+          tabIndex={-1}
+        >
+          <div className="app-content">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/about" element={<About />} />
+              <Route path="/services" element={<Services />} />
 
-          <Route
-            path="/signin"
-            element={
-              <GuestRoute>
-                <SignIn />
-              </GuestRoute>
-            }
-          />
-          <Route
-            path="/signup"
-            element={
-              <GuestRoute>
-                <SignUp />
-              </GuestRoute>
-            }
-          />
-          <Route path="/forgot-password" element={<ForgotPassword />} />
+              <Route
+                path="/signin"
+                element={
+                  <GuestRoute>
+                    <SignIn />
+                  </GuestRoute>
+                }
+              />
+              <Route
+                path="/signup"
+                element={
+                  <GuestRoute>
+                    <SignUp />
+                  </GuestRoute>
+                }
+              />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
 
-          <Route
-            path="/admin"
-            element={
-              <AdminRoute>
-                <AdminDashboard />
-              </AdminRoute>
-            }
-          />
+              <Route
+                path="/admin"
+                element={
+                  <AdminRoute>
+                    <AdminDashboard />
+                  </AdminRoute>
+                }
+              />
 
-          <Route path="/profile" element={<Profile />} />
-          <Route path="/chat" element={<Chat />} />
-          <Route path="/verify" element={<Verify />} />
-          <Route path="/tafsir" element={<Tafsir />} />
-          <Route
-            path="/auth/resetpassword/:token"
-            element={<ResetPassword />}
-          />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
+              <Route path="/profile" element={<Profile />} />
+              <Route path="/chat" element={<Chat />} />
+              <Route path="/verify" element={<Verify />} />
+              <Route path="/tafsir" element={<Tafsir />} />
+              <Route
+                path="/auth/resetpassword/:token"
+                element={<ResetPassword />}
+              />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+            {!isChat ? <Footer /> : null}
+          </div>
+        </div>
       </div>
-      <Footer />
     </>
   );
 }
@@ -189,7 +221,9 @@ function App() {
     <ErrorBoundary>
       <BrowserRouter>
         <AuthProvider>
-          <AppLayout />
+          <ChatNavigationProvider>
+            <AppLayout />
+          </ChatNavigationProvider>
         </AuthProvider>
       </BrowserRouter>
     </ErrorBoundary>

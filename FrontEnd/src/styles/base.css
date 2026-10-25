@@ -139,6 +139,7 @@ button:not(:disabled),
   flex-direction: column;
 }
 
+
 .app-content > main {
   flex: 1;
 }
