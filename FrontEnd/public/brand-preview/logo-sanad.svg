@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 100" width="440" height="200" role="img" aria-labelledby="title">
+  <title id="title">بصيرة — Sanad</title>
+  <style>@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@600&amp;display=swap"); text { font-family: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif; }</style>
+  <g transform="translate(4 24)" style="color:#9C513C"><path d="M11 10H31L39 18V38H11V10Z" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round"/><path d="M31 10V18H39" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round"/><circle cx="24" cy="28" r="3.4" fill="currentColor"/></g>
+  <text x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', 'Segoe UI', Tahoma, sans-serif" font-size="49" font-weight="600" fill="#211C18">بصيرة</text>
+</svg>

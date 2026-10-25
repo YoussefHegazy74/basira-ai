@@ -1,0 +1,685 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>بصيرة — brand preview</title>
+  <link rel="icon" href="data:,">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --preview-bg: #EDE7DB;
+      --preview-surface: #F8F3E9;
+      --preview-card: #FCF8F0;
+      --preview-text: #1D2118;
+      --preview-muted: #5D6454;
+      --preview-border: #D3C9B8;
+      --preview-accent: #9C513C;
+      --preview-dark: #171310;
+      --preview-cream: #F3ECE3;
+      --font: "IBM Plex Sans Arabic", "Segoe UI", Tahoma, sans-serif;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; background: var(--preview-bg); color: var(--preview-text); font-family: var(--font); font-size: 15px; line-height: 1.7; }
+    .page { width: min(1180px, calc(100% - 40px)); margin: 0 auto; padding: 44px 0 96px; }
+    a { color: var(--preview-accent); }
+    h1, h2, h3, h4 { margin: 0; line-height: 1.25; text-wrap: balance; }
+    h1 { max-width: 820px; font-size: clamp(2.5rem, 5vw, 4.3rem); font-weight: 600; letter-spacing: -0.035em; }
+    h2 { font-size: clamp(1.6rem, 2.8vw, 2.2rem); font-weight: 600; }
+    h3 { font-size: 1.25rem; font-weight: 600; }
+    h4 { font-size: 0.82rem; font-weight: 600; letter-spacing: 0.01em; }
+    p { margin: 0; }
+    code { font-family: var(--mono); font-size: 0.72rem; color: var(--preview-muted); }
+    .kicker { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 18px; color: var(--preview-muted); font-size: 0.78rem; letter-spacing: 0.09em; text-transform: uppercase; }
+    .kicker::before { width: 8px; height: 8px; border-radius: 50%; background: var(--preview-accent); content: ""; }
+    .lede { max-width: 760px; margin-top: 20px; color: var(--preview-muted); font-size: 1rem; }
+    .hero-meta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+    .hero-meta span { padding: 6px 11px; border: 1px solid var(--preview-border); border-radius: 999px; color: var(--preview-muted); font-size: 0.75rem; }
+    .research { margin-top: 44px; padding: 24px 26px; background: var(--preview-surface); border: 1px solid var(--preview-border); border-radius: 20px; }
+    .research h2 { margin-bottom: 12px; font-size: 1.15rem; }
+    .research ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 28px; margin: 0; padding-inline-start: 18px; color: var(--preview-muted); font-size: 0.86rem; }
+    .research li::marker { color: var(--preview-accent); }
+    .fine { margin-top: 14px; color: var(--preview-muted); font-size: 0.78rem; }
+    .section-head { display: flex; align-items: flex-start; gap: 18px; margin: 70px 0 22px; padding-bottom: 16px; border-bottom: 1px solid var(--preview-border); }
+    .section-head .num, .concept-head .num, .palette-head .num { color: var(--preview-accent); font-family: var(--mono); font-size: 0.76rem; line-height: 1.8; }
+    .section-head p { max-width: 640px; margin-top: 6px; color: var(--preview-muted); font-size: 0.9rem; }
+    .concept, .palette-card { margin-top: 24px; padding: 26px; background: var(--preview-card); border: 1px solid var(--preview-border); border-radius: 24px; }
+    .concept-head, .palette-head { display: flex; align-items: flex-start; gap: 16px; }
+    .concept-head h3, .palette-head h3 { margin-bottom: 4px; }
+    .concept-head h3 span, .palette-head h3 span { margin-inline-start: 8px; color: var(--preview-muted); font-size: 0.86rem; font-weight: 400; }
+    .concept-head p, .palette-head p { max-width: 820px; color: var(--preview-muted); font-size: 0.9rem; }
+    .logo-grid { display: grid; grid-template-columns: 1.45fr 1fr; gap: 10px; margin-top: 20px; }
+    .logo-panel, .onecolor { display: flex; min-height: 190px; flex-direction: column; justify-content: space-between; gap: 14px; padding: 18px; border-radius: 18px; }
+    .logo-light { background: #F6F0E6; color: #211C18; }
+    .logo-dark { background: #171310; color: #F3ECE3; }
+    .small-panel { min-height: 150px; }
+    .panel-label, .demo-label { color: currentColor; font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.06em; opacity: 0.6; text-transform: uppercase; }
+    .lockup { display: block; width: min(100%, 300px); height: auto; overflow: visible; }
+    .lockup-sm { width: 160px; }
+    .lockup-mark { color: var(--preview-accent); }
+    .logo-dark .lockup-mark { color: #D38F79; }
+    .onecolor .lockup { width: 220px; }
+    .onecolor .lockup-mark { color: currentColor !important; }
+    .small-line { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; }
+    .mark { display: block; width: 48px; height: 48px; }
+    .mark-xs { width: 24px; height: 24px; }
+    .onecolor-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .onecolor { min-height: 118px; }
+    .onecolor .panel-label { opacity: 0.55; }
+    .concept-foot { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 12px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--preview-border); color: var(--preview-muted); font-size: 0.8rem; }
+    .concept-foot a { font-size: 0.78rem; font-weight: 600; text-decoration: none; }
+    .concept-foot a:hover { text-decoration: underline; text-underline-offset: 3px; }
+    .scales { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; margin-top: 20px; }
+    .scale-block h4, .token-group h4, .contrast-col h4 { margin-bottom: 8px; color: var(--preview-muted); }
+    .token-grid { display: grid; grid-template-columns: 1fr; gap: 4px; }
+    .token { display: flex; min-width: 0; align-items: center; gap: 8px; }
+    .swatch { width: 18px; height: 18px; flex: 0 0 auto; border: 1px solid rgb(29 33 24 / 0.13); border-radius: 5px; }
+    .token-name { min-width: 0; flex: 1; overflow: hidden; color: var(--preview-muted); font-family: var(--mono); font-size: 0.64rem; text-overflow: ellipsis; white-space: nowrap; }
+    .token code { flex: 0 0 auto; font-size: 0.64rem; }
+    .demo-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 26px; }
+    .mock-wrap { display: flex; min-width: 0; flex-direction: column; gap: 7px; }
+    .demo-label { color: var(--preview-muted); opacity: 0.8; }
+    .pv { overflow: hidden; border: 1px solid var(--pv-border); border-radius: 16px; background: linear-gradient(180deg, var(--pv-bg) 0%, var(--pv-surface-muted) 100%); color: var(--pv-text); font-size: 12px; line-height: 1.7; }
+    .pv-nav { display: flex; align-items: center; gap: 12px; padding: 10px 12px; background: var(--pv-surface-raised); border-bottom: 1px solid var(--pv-border); }
+    .pv-brand { display: inline-flex; align-items: center; gap: 6px; color: var(--pv-text); font-size: 16px; font-weight: 700; line-height: 1; white-space: nowrap; }
+    .pv-brand-dot { width: 14px; height: 14px; border-radius: 50%; background: var(--pv-accent); }
+    .pv-links { display: flex; min-width: 0; flex: 1; align-items: center; justify-content: center; gap: 10px; color: var(--pv-muted); font-size: 11px; white-space: nowrap; }
+    .pv-active { padding: 2px 6px; border-radius: 5px; background: var(--pv-surface-strong); color: var(--pv-text); font-weight: 600; }
+    .pv-btn { display: inline-flex; min-height: 32px; align-items: center; justify-content: center; padding: 5px 10px; border: 1px solid transparent; border-radius: 7px; font-family: var(--font); font-size: 11px; cursor: default; }
+    .pv-btn-primary { background: var(--pv-accent); color: var(--pv-accent-contrast); font-weight: 600; }
+    .pv-btn-secondary { background: var(--pv-surface-raised); color: var(--pv-text); border-color: var(--pv-border-strong); }
+    .pv-btn-ghost { background: transparent; color: var(--pv-text); border-color: var(--pv-border-strong); white-space: nowrap; }
+    .pv-body { display: flex; flex-direction: column; gap: 10px; padding: 10px; }
+    .pv-card { padding: 12px; background: var(--pv-surface); border: 1px solid var(--pv-border); border-radius: 12px; box-shadow: 0 10px 22px rgb(33 28 24 / 0.06); }
+    .pv-card-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+    .pv-kicker { color: var(--pv-muted); font-size: 9px; }
+    .pv-card h4 { margin-bottom: 3px; color: var(--pv-text); font-size: 16px; }
+    .pv-card p { margin-bottom: 10px; color: var(--pv-text-soft); font-size: 11px; }
+    .pv-card label { display: block; margin-bottom: 3px; color: var(--pv-text-soft); font-size: 10px; }
+    .pv-input { margin-bottom: 9px; padding: 8px 10px; background: var(--pv-surface-raised); border: 1px solid var(--pv-border-strong); border-radius: 7px; color: var(--pv-muted); font-size: 11px; }
+    .pv-actions { display: flex; gap: 6px; }
+    .pv-chat { padding: 10px; background: var(--pv-surface-muted); border: 1px solid var(--pv-border); border-radius: 12px; }
+    .pv-chat-head { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; color: var(--pv-text); font-size: 11px; }
+    .pv-chat-avatar { width: 16px; height: 16px; border-radius: 50%; background: var(--pv-accent); }
+    .pv-status { margin-inline-start: auto; color: var(--pv-muted); font-size: 9px; }
+    .pv-bubble { max-width: 86%; margin-bottom: 7px; padding: 8px 10px; border-radius: 10px; font-size: 11px; line-height: 1.75; }
+    .pv-user { margin-inline-start: auto; background: var(--pv-accent); color: var(--pv-accent-contrast); border-end-start-radius: 3px; }
+    .pv-assistant { background: var(--pv-surface-raised); color: var(--pv-text-soft); border: 1px solid var(--pv-border); border-end-end-radius: 3px; }
+    .pv-cite { color: var(--pv-accent); font-weight: 600; }
+    .pv-source { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--pv-border); color: var(--pv-accent); font-size: 9px; }
+    .pv-composer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; background: var(--pv-surface-raised); border: 1px solid var(--pv-border-strong); border-radius: 8px; color: var(--pv-muted); font-size: 10px; }
+    .pv-send { color: var(--pv-accent); font-weight: 600; }
+    .pv-semantics { display: flex; flex-wrap: wrap; gap: 5px; }
+    .pv-chip { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px; border: 1px solid transparent; border-radius: 999px; font-size: 9px; font-weight: 600; }
+    .pv-chip-success { background: var(--pv-success-soft); color: var(--pv-success); border-color: color-mix(in srgb, var(--pv-success) 22%, transparent); }
+    .pv-chip-warning { background: var(--pv-warning-soft); color: var(--pv-warning); border-color: color-mix(in srgb, var(--pv-warning) 22%, transparent); }
+    .pv-chip-danger { background: var(--pv-danger-soft); color: var(--pv-danger); border-color: color-mix(in srgb, var(--pv-danger) 22%, transparent); }
+    .tokens-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--preview-border); }
+    .token-group .token-grid { grid-template-columns: 1fr 1fr; gap: 5px 14px; }
+    .contrast-wrap { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--preview-border); }
+    .contrast-table { width: 100%; border-collapse: collapse; font-size: 0.72rem; }
+    .contrast-table th { padding: 5px 0; color: var(--preview-muted); border-bottom: 1px solid var(--preview-border); font-weight: 500; text-align: start; }
+    .contrast-table td { padding: 5px 0; border-bottom: 1px solid var(--preview-border); }
+    .contrast-table th:last-child, .contrast-table td:last-child { text-align: end; }
+    .contrast-table td:nth-child(2) { color: var(--preview-muted); font-family: var(--mono); font-size: 0.68rem; }
+    .pass { color: #3F6B4F; font-weight: 600; }
+    .fail { color: #963D34; font-weight: 600; }
+    .note { margin-top: 18px; color: var(--preview-muted); font-size: 0.78rem; }
+    footer { margin-top: 54px; padding-top: 20px; border-top: 1px solid var(--preview-border); color: var(--preview-muted); font-size: 0.75rem; }
+    .svg-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+    @media (max-width: 900px) {
+      .logo-grid, .demo-grid, .tokens-wrap, .contrast-wrap, .scales { grid-template-columns: 1fr; }
+      .onecolor-row { grid-template-columns: 1fr; }
+      .research ul { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 560px) {
+      .page { width: calc(100% - 24px); padding-top: 28px; }
+      .concept, .palette-card { padding: 16px; border-radius: 18px; }
+      .logo-panel, .onecolor { padding: 14px; }
+      .pv-links { display: none; }
+      .pv-nav { justify-content: space-between; }
+      .lockup { width: min(100%, 260px); }
+      .onecolor .lockup { width: 190px; }
+    }
+    .pv-clay-light {
+      --pv-bg: #F6F0E6;
+      --pv-surface: #FFFBF4;
+      --pv-surface-raised: #FFFDF8;
+      --pv-surface-muted: #EFE6D9;
+      --pv-surface-strong: #E5D9C8;
+      --pv-text: #211C18;
+      --pv-text-soft: #4E453C;
+      --pv-muted: #6F6458;
+      --pv-border: #DDD0BF;
+      --pv-border-strong: #94836F;
+      --pv-accent: #9C513C;
+      --pv-accent-hover: #7F3F2E;
+      --pv-accent-contrast: #FFF8F0;
+      --pv-accent-soft: #F3E2DA;
+      --pv-accent-soft-strong: #E7CDBF;
+      --pv-focus: #7F3F2E;
+      --pv-success: #3F6B4F;
+      --pv-success-soft: #E8F0E8;
+      --pv-warning: #7D5A1D;
+      --pv-warning-soft: #F5ECD7;
+      --pv-danger: #963D34;
+      --pv-danger-soft: #F7E5E0;
+    }
+.pv-clay-dark {
+      --pv-bg: #171310;
+      --pv-surface: #201B17;
+      --pv-surface-raised: #29221C;
+      --pv-surface-muted: #251F1A;
+      --pv-surface-strong: #322A23;
+      --pv-text: #F3ECE3;
+      --pv-text-soft: #D2C6B8;
+      --pv-muted: #A39586;
+      --pv-border: #3A3129;
+      --pv-border-strong: #746556;
+      --pv-accent: #D38F79;
+      --pv-accent-hover: #E1A48F;
+      --pv-accent-contrast: #21120D;
+      --pv-accent-soft: #3A2620;
+      --pv-accent-soft-strong: #4A3028;
+      --pv-focus: #E1A48F;
+      --pv-success: #9AC7A7;
+      --pv-success-soft: #1F2F24;
+      --pv-warning: #D9B978;
+      --pv-warning-soft: #352C1D;
+      --pv-danger: #E3A099;
+      --pv-danger-soft: #382320;
+    }
+.pv-olive-light {
+      --pv-bg: #F6F1E5;
+      --pv-surface: #FFFCF4;
+      --pv-surface-raised: #FFFEF9;
+      --pv-surface-muted: #EEE8DA;
+      --pv-surface-strong: #E4DCCB;
+      --pv-text: #1D2118;
+      --pv-text-soft: #48503F;
+      --pv-muted: #626A58;
+      --pv-border: #DAD2C2;
+      --pv-border-strong: #928873;
+      --pv-accent: #5A6847;
+      --pv-accent-hover: #465337;
+      --pv-accent-contrast: #FFFBF3;
+      --pv-accent-soft: #E8EBDD;
+      --pv-accent-soft-strong: #D7DDC6;
+      --pv-focus: #465337;
+      --pv-success: #3B684B;
+      --pv-success-soft: #E6EFE7;
+      --pv-warning: #7C5A1E;
+      --pv-warning-soft: #F5ECD7;
+      --pv-danger: #963D34;
+      --pv-danger-soft: #F7E5E0;
+    }
+.pv-olive-dark {
+      --pv-bg: #141712;
+      --pv-surface: #1C211A;
+      --pv-surface-raised: #252B22;
+      --pv-surface-muted: #22281E;
+      --pv-surface-strong: #2F362A;
+      --pv-text: #EFF2E8;
+      --pv-text-soft: #CDD3C2;
+      --pv-muted: #A0A893;
+      --pv-border: #353D2F;
+      --pv-border-strong: #68745E;
+      --pv-accent: #B2BE96;
+      --pv-accent-hover: #C5D0A9;
+      --pv-accent-contrast: #1A2112;
+      --pv-accent-soft: #293322;
+      --pv-accent-soft-strong: #37442C;
+      --pv-focus: #C5D0A9;
+      --pv-success: #9AC7A7;
+      --pv-success-soft: #1F2F24;
+      --pv-warning: #D9B978;
+      --pv-warning-soft: #352C1D;
+      --pv-danger: #E3A099;
+      --pv-danger-soft: #382320;
+    }
+.pv-teal-light {
+      --pv-bg: #F4F0E8;
+      --pv-surface: #FFFCF7;
+      --pv-surface-raised: #FFFEFA;
+      --pv-surface-muted: #ECE8DF;
+      --pv-surface-strong: #E1DCD1;
+      --pv-text: #1A2321;
+      --pv-text-soft: #44514D;
+      --pv-muted: #5D6964;
+      --pv-border: #D6D2C8;
+      --pv-border-strong: #879086;
+      --pv-accent: #2E655E;
+      --pv-accent-hover: #234E48;
+      --pv-accent-contrast: #F7FBF8;
+      --pv-accent-soft: #DFEAE7;
+      --pv-accent-soft-strong: #C9DDD8;
+      --pv-focus: #234E48;
+      --pv-success: #3B684B;
+      --pv-success-soft: #E6EFE7;
+      --pv-warning: #7C5A1E;
+      --pv-warning-soft: #F5ECD7;
+      --pv-danger: #963D34;
+      --pv-danger-soft: #F7E5E0;
+    }
+.pv-teal-dark {
+      --pv-bg: #111716;
+      --pv-surface: #19201E;
+      --pv-surface-raised: #222926;
+      --pv-surface-muted: #1F2725;
+      --pv-surface-strong: #2B3430;
+      --pv-text: #EAF0ED;
+      --pv-text-soft: #C6D0CB;
+      --pv-muted: #9AA7A1;
+      --pv-border: #303A36;
+      --pv-border-strong: #67756F;
+      --pv-accent: #8FC1B8;
+      --pv-accent-hover: #A5D3CA;
+      --pv-accent-contrast: #10211D;
+      --pv-accent-soft: #20332F;
+      --pv-accent-soft-strong: #2C453F;
+      --pv-focus: #A5D3CA;
+      --pv-success: #9AC7A7;
+      --pv-success-soft: #1F2F24;
+      --pv-warning: #D9B978;
+      --pv-warning-soft: #352C1D;
+      --pv-danger: #E3A099;
+      --pv-danger-soft: #382320;
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <header>
+      <p class="kicker">بصيرة · brand preview</p>
+      <h1>Logo and color directions</h1>
+      <p class="lede">Three logo concepts and three palettes for «بصيرة». The website and every mock UI stay Arabic; the notes are in English. Nothing in the app has been changed yet.</p>
+      <div class="hero-meta"><span>Arabic wordmark only</span><span>No tagline</span><span>No gold</span><span>No religious symbols</span></div>
+    </header>
+
+    <section class="research">
+      <h2>What I took from the references</h2>
+      <ul>
+        <li><strong>Yaqeen Institute:</strong> clear research hierarchy and visible citations. Avoid its saturated blue and orange.</li>
+        <li><strong>Tarteel:</strong> monochrome confidence and one simple geometric mark. Avoid relying on a large lifestyle photo as the brand.</li>
+        <li><strong>Qalam Institute:</strong> warmth and community. Avoid its generic bright-blue call to action.</li>
+        <li><strong>Linear:</strong> layered dark surfaces, quiet borders, one restrained accent. Avoid neon or AI-style gradients.</li>
+        <li><strong>Notion:</strong> approachable warmth and a single soft highlight. Avoid playful illustrations here; this brand needs more gravity.</li>
+        <li><strong>IxDF logo principles:</strong> simple, memorable, scalable, versatile, and tested in one color.</li>
+        <li><strong>WCAG:</strong> 4.5:1 for normal text, 3:1 for large text and UI edges.</li>
+        <li><strong>Microsoft Arabic typography + IBM Plex Sans Arabic:</strong> respect contextual forms, joins, dots, and diacritics; never force Latin metrics onto Arabic.</li>
+      </ul>
+      <p class="fine">Clichés avoided: eye, crescent, mosque, prayer beads, gold or metal, sparkles, robots, brains, circuits, generic chat bubbles, default “tech blue”, pure black, and pure white.</p>
+    </section>
+
+    <section id="logos">
+      <div class="section-head">
+        <span class="num">01</span>
+        <div><h2>Logo concepts</h2><p>Each concept is a symbol plus the Arabic wordmark «بصيرة». The mark is on the left, so the Arabic name starts at the right edge and reads naturally. Every version is vector SVG. The accent in these panels is only a demo; the mark inherits the chosen palette.</p></div>
+      </div>
+      <article class="concept" id="logo-nuqta">
+    <div class="concept-head">
+      <span class="num">01</span>
+      <div><h3>نقطة <span>Nuqta</span></h3><p>The dot beneath the Arabic letter ب becomes a point of certainty, resting below a calm open stroke.</p></div>
+    </div>
+    <div class="logo-grid">
+      <div class="logo-panel logo-light two-tone">
+        <span class="panel-label">Light / large</span>
+        <svg class="lockup lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Nuqta">
+    <use href="#mark-nuqta" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg>
+      </div>
+      <div class="logo-panel logo-dark two-tone dark-accent">
+        <span class="panel-label">Dark / large</span>
+        <svg class="lockup lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Nuqta">
+    <use href="#mark-nuqta" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg>
+      </div>
+      <div class="logo-panel logo-light two-tone small-panel">
+        <span class="panel-label">Light / small</span>
+        <div class="small-line"><svg class="lockup lockup-sm lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Nuqta">
+    <use href="#mark-nuqta" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg><svg class="mark mark-xs" viewBox="0 0 48 48" role="img" aria-label="رمز بصيرة — Nuqta"><use href="#mark-nuqta"></use></svg></div>
+      </div>
+      <div class="logo-panel logo-dark two-tone dark-accent small-panel">
+        <span class="panel-label">Dark / small</span>
+        <div class="small-line"><svg class="lockup lockup-sm lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Nuqta">
+    <use href="#mark-nuqta" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg><svg class="mark mark-xs" viewBox="0 0 48 48" role="img" aria-label="رمز بصيرة — Nuqta"><use href="#mark-nuqta"></use></svg></div>
+      </div>
+    </div>
+    <div class="onecolor-row">
+      <div class="onecolor logo-light"><span class="panel-label">One color / light</span><svg class="lockup" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Nuqta">
+    <use href="#mark-nuqta" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg></div>
+      <div class="onecolor logo-dark"><span class="panel-label">One color / dark</span><svg class="lockup" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Nuqta">
+    <use href="#mark-nuqta" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg></div>
+    </div>
+    <div class="concept-foot"><span class="principle"><strong>Principle:</strong> Meaningful simplicity. It owns one Arabic letterform, stays warm, and is still legible at 16 px.</span><a href="./logo-nuqta.svg" target="_blank" rel="noreferrer">Open SVG</a></div>
+  </article>
+<article class="concept" id="logo-sanad">
+    <div class="concept-head">
+      <span class="num">02</span>
+      <div><h3>سند <span>Sanad</span></h3><p>A folded source page with one solid point. It suggests a reference you can open, read, and verify.</p></div>
+    </div>
+    <div class="logo-grid">
+      <div class="logo-panel logo-light two-tone">
+        <span class="panel-label">Light / large</span>
+        <svg class="lockup lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Sanad">
+    <use href="#mark-sanad" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg>
+      </div>
+      <div class="logo-panel logo-dark two-tone dark-accent">
+        <span class="panel-label">Dark / large</span>
+        <svg class="lockup lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Sanad">
+    <use href="#mark-sanad" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg>
+      </div>
+      <div class="logo-panel logo-light two-tone small-panel">
+        <span class="panel-label">Light / small</span>
+        <div class="small-line"><svg class="lockup lockup-sm lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Sanad">
+    <use href="#mark-sanad" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg><svg class="mark mark-xs" viewBox="0 0 48 48" role="img" aria-label="رمز بصيرة — Sanad"><use href="#mark-sanad"></use></svg></div>
+      </div>
+      <div class="logo-panel logo-dark two-tone dark-accent small-panel">
+        <span class="panel-label">Dark / small</span>
+        <div class="small-line"><svg class="lockup lockup-sm lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Sanad">
+    <use href="#mark-sanad" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg><svg class="mark mark-xs" viewBox="0 0 48 48" role="img" aria-label="رمز بصيرة — Sanad"><use href="#mark-sanad"></use></svg></div>
+      </div>
+    </div>
+    <div class="onecolor-row">
+      <div class="onecolor logo-light"><span class="panel-label">One color / light</span><svg class="lockup" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Sanad">
+    <use href="#mark-sanad" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg></div>
+      <div class="onecolor logo-dark"><span class="panel-label">One color / dark</span><svg class="lockup" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Sanad">
+    <use href="#mark-sanad" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg></div>
+    </div>
+    <div class="concept-foot"><span class="principle"><strong>Principle:</strong> One clear metaphor, no book or chat-bubble cliché. The shape survives in one color and at favicon size.</span><a href="./logo-sanad.svg" target="_blank" rel="noreferrer">Open SVG</a></div>
+  </article>
+<article class="concept" id="logo-masar">
+    <div class="concept-head">
+      <span class="num">03</span>
+      <div><h3>مسار <span>Masar</span></h3><p>A solid point, the source, connects by a calm curve to an open ring, understanding.</p></div>
+    </div>
+    <div class="logo-grid">
+      <div class="logo-panel logo-light two-tone">
+        <span class="panel-label">Light / large</span>
+        <svg class="lockup lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Masar">
+    <use href="#mark-masar" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg>
+      </div>
+      <div class="logo-panel logo-dark two-tone dark-accent">
+        <span class="panel-label">Dark / large</span>
+        <svg class="lockup lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Masar">
+    <use href="#mark-masar" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg>
+      </div>
+      <div class="logo-panel logo-light two-tone small-panel">
+        <span class="panel-label">Light / small</span>
+        <div class="small-line"><svg class="lockup lockup-sm lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Masar">
+    <use href="#mark-masar" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg><svg class="mark mark-xs" viewBox="0 0 48 48" role="img" aria-label="رمز بصيرة — Masar"><use href="#mark-masar"></use></svg></div>
+      </div>
+      <div class="logo-panel logo-dark two-tone dark-accent small-panel">
+        <span class="panel-label">Dark / small</span>
+        <div class="small-line"><svg class="lockup lockup-sm lockup-two-tone" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Masar">
+    <use href="#mark-masar" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg><svg class="mark mark-xs" viewBox="0 0 48 48" role="img" aria-label="رمز بصيرة — Masar"><use href="#mark-masar"></use></svg></div>
+      </div>
+    </div>
+    <div class="onecolor-row">
+      <div class="onecolor logo-light"><span class="panel-label">One color / light</span><svg class="lockup" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Masar">
+    <use href="#mark-masar" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg></div>
+      <div class="onecolor logo-dark"><span class="panel-label">One color / dark</span><svg class="lockup" viewBox="0 0 220 100" role="img" aria-label="بصيرة — Masar">
+    <use href="#mark-masar" x="4" y="24" width="52" height="52" class="lockup-mark"></use>
+    <text class="lockup-word" x="140" y="68" text-anchor="middle" direction="rtl" font-family="'IBM Plex Sans Arabic', sans-serif" font-size="49" font-weight="600" fill="currentColor">بصيرة</text>
+  </svg></div>
+    </div>
+    <div class="concept-foot"><span class="principle"><strong>Principle:</strong> Contrast of solid and open shapes. It reads as a path or a trace, not as a generic link icon.</span><a href="./logo-masar.svg" target="_blank" rel="noreferrer">Open SVG</a></div>
+  </article>
+    </section>
+
+    <section id="palettes">
+      <div class="section-head">
+        <span class="num">02</span>
+        <div><h2>Color directions</h2><p>All three use a warm sand and ink base, with a different accent family. Every sample below uses Arabic UI text. The ratios are measured, not estimated.</p></div>
+      </div>
+      <article class="palette-card" id="palette-clay">
+    <div class="palette-head">
+      <span class="num">01</span>
+      <div><h3>Clay & Sand <span>Warm, human, editorial</span></h3><p>A muted clay accent on warm parchment. It feels approachable and carefully made, while the deep ink keeps it serious. The accent is deliberately separated from the success green.</p></div>
+    </div>
+    <div class="scales">
+      <div class="scale-block"><h4>Accent scale</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#F3E2DA"></span><span class="token-name">--accent-100</span><code>#F3E2DA</code></div><div class="token"><span class="swatch" style="background:#D6A28F"></span><span class="token-name">--accent-300</span><code>#D6A28F</code></div><div class="token"><span class="swatch" style="background:#9C513C"></span><span class="token-name">--accent-500</span><code>#9C513C</code></div><div class="token"><span class="swatch" style="background:#7F3F2E"></span><span class="token-name">--accent-700</span><code>#7F3F2E</code></div><div class="token"><span class="swatch" style="background:#4F251B"></span><span class="token-name">--accent-900</span><code>#4F251B</code></div></div></div>
+      <div class="scale-block"><h4>Neutral tint</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#F6F0E6"></span><span class="token-name">--neutral-100</span><code>#F6F0E6</code></div><div class="token"><span class="swatch" style="background:#E5D9C8"></span><span class="token-name">--neutral-300</span><code>#E5D9C8</code></div><div class="token"><span class="swatch" style="background:#B4A18B"></span><span class="token-name">--neutral-500</span><code>#B4A18B</code></div><div class="token"><span class="swatch" style="background:#6F6458"></span><span class="token-name">--neutral-700</span><code>#6F6458</code></div><div class="token"><span class="swatch" style="background:#211C18"></span><span class="token-name">--neutral-900</span><code>#211C18</code></div></div></div>
+    </div>
+    <div class="demo-grid">
+      <div class="mock-wrap"><span class="demo-label">Light mode</span><div class="pv pv-clay-light" dir="rtl">
+    <div class="pv-nav">
+      <div class="pv-brand"><span class="pv-brand-dot"></span><span>بصيرة</span></div>
+      <div class="pv-links"><span class="pv-active">الرئيسية</span><span>الخدمات</span><span>عن بصيرة</span></div>
+      <button class="pv-btn pv-btn-ghost">تسجيل الدخول</button>
+    </div>
+    <div class="pv-body">
+      <div class="pv-card">
+        <div class="pv-card-top"><span class="pv-kicker">أداة التحقق</span><span class="pv-chip pv-chip-success">مدعوم بالمصادر</span></div>
+        <h4>التحقق من المعلومات</h4>
+        <p>ضع النص أمامك، واعرف ما إذا كانت المصادر تدعمه أم تحتاج إلى مراجعة.</p>
+        <label>البريد الإلكتروني</label>
+        <div class="pv-input">أدخل بريدك الإلكتروني…</div>
+        <div class="pv-actions"><button class="pv-btn pv-btn-primary">ابدأ التحقق</button><button class="pv-btn pv-btn-secondary">مثال</button></div>
+      </div>
+      <div class="pv-chat">
+        <div class="pv-chat-head"><span class="pv-chat-avatar"></span><strong>المساعد المعرفي</strong><span class="pv-status">جاهز</span></div>
+        <div class="pv-bubble pv-user">ما تفسير قوله تعالى: ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾؟</div>
+        <div class="pv-bubble pv-assistant">الآية تبشّر المؤمن بأن مع العسر يسرًا، وتدعوه إلى الصبر والرجاء. <span class="pv-cite">(مصدر 1)</span><div class="pv-source">تفسير — سورة الشرح</div></div>
+        <div class="pv-composer">اكتب سؤالك الشرعي… <span class="pv-send">إرسال</span></div>
+      </div>
+      <div class="pv-semantics"><span class="pv-chip pv-chip-success">تم التحقق</span><span class="pv-chip pv-chip-warning">يحتاج مراجعة</span><span class="pv-chip pv-chip-danger">تعذّر الاتصال</span></div>
+    </div>
+  </div></div>
+      <div class="mock-wrap"><span class="demo-label">Dark mode</span><div class="pv pv-clay-dark" dir="rtl">
+    <div class="pv-nav">
+      <div class="pv-brand"><span class="pv-brand-dot"></span><span>بصيرة</span></div>
+      <div class="pv-links"><span class="pv-active">الرئيسية</span><span>الخدمات</span><span>عن بصيرة</span></div>
+      <button class="pv-btn pv-btn-ghost">تسجيل الدخول</button>
+    </div>
+    <div class="pv-body">
+      <div class="pv-card">
+        <div class="pv-card-top"><span class="pv-kicker">أداة التحقق</span><span class="pv-chip pv-chip-success">مدعوم بالمصادر</span></div>
+        <h4>التحقق من المعلومات</h4>
+        <p>ضع النص أمامك، واعرف ما إذا كانت المصادر تدعمه أم تحتاج إلى مراجعة.</p>
+        <label>البريد الإلكتروني</label>
+        <div class="pv-input">أدخل بريدك الإلكتروني…</div>
+        <div class="pv-actions"><button class="pv-btn pv-btn-primary">ابدأ التحقق</button><button class="pv-btn pv-btn-secondary">مثال</button></div>
+      </div>
+      <div class="pv-chat">
+        <div class="pv-chat-head"><span class="pv-chat-avatar"></span><strong>المساعد المعرفي</strong><span class="pv-status">جاهز</span></div>
+        <div class="pv-bubble pv-user">ما تفسير قوله تعالى: ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾؟</div>
+        <div class="pv-bubble pv-assistant">الآية تبشّر المؤمن بأن مع العسر يسرًا، وتدعوه إلى الصبر والرجاء. <span class="pv-cite">(مصدر 1)</span><div class="pv-source">تفسير — سورة الشرح</div></div>
+        <div class="pv-composer">اكتب سؤالك الشرعي… <span class="pv-send">إرسال</span></div>
+      </div>
+      <div class="pv-semantics"><span class="pv-chip pv-chip-success">تم التحقق</span><span class="pv-chip pv-chip-warning">يحتاج مراجعة</span><span class="pv-chip pv-chip-danger">تعذّر الاتصال</span></div>
+    </div>
+  </div></div>
+    </div>
+    <div class="tokens-wrap">
+      <div class="token-group"><h4>Light tokens</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#F6F0E6"></span><span class="token-name">--bg</span><code>#F6F0E6</code></div><div class="token"><span class="swatch" style="background:#FFFBF4"></span><span class="token-name">--surface</span><code>#FFFBF4</code></div><div class="token"><span class="swatch" style="background:#FFFDF8"></span><span class="token-name">--surface-raised</span><code>#FFFDF8</code></div><div class="token"><span class="swatch" style="background:#EFE6D9"></span><span class="token-name">--surface-muted</span><code>#EFE6D9</code></div><div class="token"><span class="swatch" style="background:#E5D9C8"></span><span class="token-name">--surface-strong</span><code>#E5D9C8</code></div><div class="token"><span class="swatch" style="background:#211C18"></span><span class="token-name">--text</span><code>#211C18</code></div><div class="token"><span class="swatch" style="background:#4E453C"></span><span class="token-name">--text-soft</span><code>#4E453C</code></div><div class="token"><span class="swatch" style="background:#6F6458"></span><span class="token-name">--muted</span><code>#6F6458</code></div><div class="token"><span class="swatch" style="background:#DDD0BF"></span><span class="token-name">--border</span><code>#DDD0BF</code></div><div class="token"><span class="swatch" style="background:#94836F"></span><span class="token-name">--border-strong</span><code>#94836F</code></div><div class="token"><span class="swatch" style="background:#9C513C"></span><span class="token-name">--accent</span><code>#9C513C</code></div><div class="token"><span class="swatch" style="background:#7F3F2E"></span><span class="token-name">--accent-hover</span><code>#7F3F2E</code></div><div class="token"><span class="swatch" style="background:#FFF8F0"></span><span class="token-name">--accent-contrast</span><code>#FFF8F0</code></div><div class="token"><span class="swatch" style="background:#F3E2DA"></span><span class="token-name">--accent-soft</span><code>#F3E2DA</code></div><div class="token"><span class="swatch" style="background:#E7CDBF"></span><span class="token-name">--accent-soft-strong</span><code>#E7CDBF</code></div><div class="token"><span class="swatch" style="background:#7F3F2E"></span><span class="token-name">--focus</span><code>#7F3F2E</code></div><div class="token"><span class="swatch" style="background:#3F6B4F"></span><span class="token-name">--success</span><code>#3F6B4F</code></div><div class="token"><span class="swatch" style="background:#E8F0E8"></span><span class="token-name">--success-soft</span><code>#E8F0E8</code></div><div class="token"><span class="swatch" style="background:#7D5A1D"></span><span class="token-name">--warning</span><code>#7D5A1D</code></div><div class="token"><span class="swatch" style="background:#F5ECD7"></span><span class="token-name">--warning-soft</span><code>#F5ECD7</code></div><div class="token"><span class="swatch" style="background:#963D34"></span><span class="token-name">--danger</span><code>#963D34</code></div><div class="token"><span class="swatch" style="background:#F7E5E0"></span><span class="token-name">--danger-soft</span><code>#F7E5E0</code></div></div></div>
+      <div class="token-group"><h4>Dark tokens</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#171310"></span><span class="token-name">--bg</span><code>#171310</code></div><div class="token"><span class="swatch" style="background:#201B17"></span><span class="token-name">--surface</span><code>#201B17</code></div><div class="token"><span class="swatch" style="background:#29221C"></span><span class="token-name">--surface-raised</span><code>#29221C</code></div><div class="token"><span class="swatch" style="background:#251F1A"></span><span class="token-name">--surface-muted</span><code>#251F1A</code></div><div class="token"><span class="swatch" style="background:#322A23"></span><span class="token-name">--surface-strong</span><code>#322A23</code></div><div class="token"><span class="swatch" style="background:#F3ECE3"></span><span class="token-name">--text</span><code>#F3ECE3</code></div><div class="token"><span class="swatch" style="background:#D2C6B8"></span><span class="token-name">--text-soft</span><code>#D2C6B8</code></div><div class="token"><span class="swatch" style="background:#A39586"></span><span class="token-name">--muted</span><code>#A39586</code></div><div class="token"><span class="swatch" style="background:#3A3129"></span><span class="token-name">--border</span><code>#3A3129</code></div><div class="token"><span class="swatch" style="background:#746556"></span><span class="token-name">--border-strong</span><code>#746556</code></div><div class="token"><span class="swatch" style="background:#D38F79"></span><span class="token-name">--accent</span><code>#D38F79</code></div><div class="token"><span class="swatch" style="background:#E1A48F"></span><span class="token-name">--accent-hover</span><code>#E1A48F</code></div><div class="token"><span class="swatch" style="background:#21120D"></span><span class="token-name">--accent-contrast</span><code>#21120D</code></div><div class="token"><span class="swatch" style="background:#3A2620"></span><span class="token-name">--accent-soft</span><code>#3A2620</code></div><div class="token"><span class="swatch" style="background:#4A3028"></span><span class="token-name">--accent-soft-strong</span><code>#4A3028</code></div><div class="token"><span class="swatch" style="background:#E1A48F"></span><span class="token-name">--focus</span><code>#E1A48F</code></div><div class="token"><span class="swatch" style="background:#9AC7A7"></span><span class="token-name">--success</span><code>#9AC7A7</code></div><div class="token"><span class="swatch" style="background:#1F2F24"></span><span class="token-name">--success-soft</span><code>#1F2F24</code></div><div class="token"><span class="swatch" style="background:#D9B978"></span><span class="token-name">--warning</span><code>#D9B978</code></div><div class="token"><span class="swatch" style="background:#352C1D"></span><span class="token-name">--warning-soft</span><code>#352C1D</code></div><div class="token"><span class="swatch" style="background:#E3A099"></span><span class="token-name">--danger</span><code>#E3A099</code></div><div class="token"><span class="swatch" style="background:#382320"></span><span class="token-name">--danger-soft</span><code>#382320</code></div></div></div>
+    </div>
+    <div class="contrast-wrap">
+      <div class="contrast-col"><h4>Light contrast · WCAG</h4><table class="contrast-table"><thead><tr><th>Pair</th><th>Ratio</th><th>AA</th></tr></thead><tbody><tr><td>Text / page</td><td>14.89:1</td><td class="pass">Pass</td></tr><tr><td>Muted / page</td><td>5.09:1</td><td class="pass">Pass</td></tr><tr><td>Text / card</td><td>16.36:1</td><td class="pass">Pass</td></tr><tr><td>Accent / page</td><td>5.07:1</td><td class="pass">Pass</td></tr><tr><td>Button text / accent</td><td>5.45:1</td><td class="pass">Pass</td></tr><tr><td>Input edge / card</td><td>3.55:1</td><td class="pass">Pass</td></tr><tr><td>Success / soft</td><td>5.27:1</td><td class="pass">Pass</td></tr><tr><td>Warning / soft</td><td>5.33:1</td><td class="pass">Pass</td></tr><tr><td>Error / soft</td><td>5.72:1</td><td class="pass">Pass</td></tr><tr><td>Focus / page</td><td>6.98:1</td><td class="pass">Pass</td></tr></tbody></table></div>
+      <div class="contrast-col"><h4>Dark contrast · WCAG</h4><table class="contrast-table"><thead><tr><th>Pair</th><th>Ratio</th><th>AA</th></tr></thead><tbody><tr><td>Text / page</td><td>15.76:1</td><td class="pass">Pass</td></tr><tr><td>Muted / page</td><td>6.33:1</td><td class="pass">Pass</td></tr><tr><td>Text / card</td><td>14.56:1</td><td class="pass">Pass</td></tr><tr><td>Accent / page</td><td>7.01:1</td><td class="pass">Pass</td></tr><tr><td>Button text / accent</td><td>6.89:1</td><td class="pass">Pass</td></tr><tr><td>Input edge / card</td><td>3.04:1</td><td class="pass">Pass</td></tr><tr><td>Success / soft</td><td>7.45:1</td><td class="pass">Pass</td></tr><tr><td>Warning / soft</td><td>7.30:1</td><td class="pass">Pass</td></tr><tr><td>Error / soft</td><td>6.82:1</td><td class="pass">Pass</td></tr><tr><td>Focus / page</td><td>8.71:1</td><td class="pass">Pass</td></tr></tbody></table></div>
+    </div>
+  </article>
+<article class="palette-card" id="palette-olive">
+    <div class="palette-head">
+      <span class="num">02</span>
+      <div><h3>Olive & Parchment <span>Scholarly, calm, continuous</span></h3><p>A refined olive keeps the calm recognition of the current brand, but the accent is deeper and the paper is warmer. It reads as study and reflection, not as a generic “green means success” interface.</p></div>
+    </div>
+    <div class="scales">
+      <div class="scale-block"><h4>Accent scale</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#E8EBDD"></span><span class="token-name">--accent-100</span><code>#E8EBDD</code></div><div class="token"><span class="swatch" style="background:#C3CAA9"></span><span class="token-name">--accent-300</span><code>#C3CAA9</code></div><div class="token"><span class="swatch" style="background:#5A6847"></span><span class="token-name">--accent-500</span><code>#5A6847</code></div><div class="token"><span class="swatch" style="background:#465337"></span><span class="token-name">--accent-700</span><code>#465337</code></div><div class="token"><span class="swatch" style="background:#2C3321"></span><span class="token-name">--accent-900</span><code>#2C3321</code></div></div></div>
+      <div class="scale-block"><h4>Neutral tint</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#F6F1E5"></span><span class="token-name">--neutral-100</span><code>#F6F1E5</code></div><div class="token"><span class="swatch" style="background:#E4DCCB"></span><span class="token-name">--neutral-300</span><code>#E4DCCB</code></div><div class="token"><span class="swatch" style="background:#B1A68F"></span><span class="token-name">--neutral-500</span><code>#B1A68F</code></div><div class="token"><span class="swatch" style="background:#626A58"></span><span class="token-name">--neutral-700</span><code>#626A58</code></div><div class="token"><span class="swatch" style="background:#1D2118"></span><span class="token-name">--neutral-900</span><code>#1D2118</code></div></div></div>
+    </div>
+    <div class="demo-grid">
+      <div class="mock-wrap"><span class="demo-label">Light mode</span><div class="pv pv-olive-light" dir="rtl">
+    <div class="pv-nav">
+      <div class="pv-brand"><span class="pv-brand-dot"></span><span>بصيرة</span></div>
+      <div class="pv-links"><span class="pv-active">الرئيسية</span><span>الخدمات</span><span>عن بصيرة</span></div>
+      <button class="pv-btn pv-btn-ghost">تسجيل الدخول</button>
+    </div>
+    <div class="pv-body">
+      <div class="pv-card">
+        <div class="pv-card-top"><span class="pv-kicker">أداة التحقق</span><span class="pv-chip pv-chip-success">مدعوم بالمصادر</span></div>
+        <h4>التحقق من المعلومات</h4>
+        <p>ضع النص أمامك، واعرف ما إذا كانت المصادر تدعمه أم تحتاج إلى مراجعة.</p>
+        <label>البريد الإلكتروني</label>
+        <div class="pv-input">أدخل بريدك الإلكتروني…</div>
+        <div class="pv-actions"><button class="pv-btn pv-btn-primary">ابدأ التحقق</button><button class="pv-btn pv-btn-secondary">مثال</button></div>
+      </div>
+      <div class="pv-chat">
+        <div class="pv-chat-head"><span class="pv-chat-avatar"></span><strong>المساعد المعرفي</strong><span class="pv-status">جاهز</span></div>
+        <div class="pv-bubble pv-user">ما تفسير قوله تعالى: ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾؟</div>
+        <div class="pv-bubble pv-assistant">الآية تبشّر المؤمن بأن مع العسر يسرًا، وتدعوه إلى الصبر والرجاء. <span class="pv-cite">(مصدر 1)</span><div class="pv-source">تفسير — سورة الشرح</div></div>
+        <div class="pv-composer">اكتب سؤالك الشرعي… <span class="pv-send">إرسال</span></div>
+      </div>
+      <div class="pv-semantics"><span class="pv-chip pv-chip-success">تم التحقق</span><span class="pv-chip pv-chip-warning">يحتاج مراجعة</span><span class="pv-chip pv-chip-danger">تعذّر الاتصال</span></div>
+    </div>
+  </div></div>
+      <div class="mock-wrap"><span class="demo-label">Dark mode</span><div class="pv pv-olive-dark" dir="rtl">
+    <div class="pv-nav">
+      <div class="pv-brand"><span class="pv-brand-dot"></span><span>بصيرة</span></div>
+      <div class="pv-links"><span class="pv-active">الرئيسية</span><span>الخدمات</span><span>عن بصيرة</span></div>
+      <button class="pv-btn pv-btn-ghost">تسجيل الدخول</button>
+    </div>
+    <div class="pv-body">
+      <div class="pv-card">
+        <div class="pv-card-top"><span class="pv-kicker">أداة التحقق</span><span class="pv-chip pv-chip-success">مدعوم بالمصادر</span></div>
+        <h4>التحقق من المعلومات</h4>
+        <p>ضع النص أمامك، واعرف ما إذا كانت المصادر تدعمه أم تحتاج إلى مراجعة.</p>
+        <label>البريد الإلكتروني</label>
+        <div class="pv-input">أدخل بريدك الإلكتروني…</div>
+        <div class="pv-actions"><button class="pv-btn pv-btn-primary">ابدأ التحقق</button><button class="pv-btn pv-btn-secondary">مثال</button></div>
+      </div>
+      <div class="pv-chat">
+        <div class="pv-chat-head"><span class="pv-chat-avatar"></span><strong>المساعد المعرفي</strong><span class="pv-status">جاهز</span></div>
+        <div class="pv-bubble pv-user">ما تفسير قوله تعالى: ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾؟</div>
+        <div class="pv-bubble pv-assistant">الآية تبشّر المؤمن بأن مع العسر يسرًا، وتدعوه إلى الصبر والرجاء. <span class="pv-cite">(مصدر 1)</span><div class="pv-source">تفسير — سورة الشرح</div></div>
+        <div class="pv-composer">اكتب سؤالك الشرعي… <span class="pv-send">إرسال</span></div>
+      </div>
+      <div class="pv-semantics"><span class="pv-chip pv-chip-success">تم التحقق</span><span class="pv-chip pv-chip-warning">يحتاج مراجعة</span><span class="pv-chip pv-chip-danger">تعذّر الاتصال</span></div>
+    </div>
+  </div></div>
+    </div>
+    <div class="tokens-wrap">
+      <div class="token-group"><h4>Light tokens</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#F6F1E5"></span><span class="token-name">--bg</span><code>#F6F1E5</code></div><div class="token"><span class="swatch" style="background:#FFFCF4"></span><span class="token-name">--surface</span><code>#FFFCF4</code></div><div class="token"><span class="swatch" style="background:#FFFEF9"></span><span class="token-name">--surface-raised</span><code>#FFFEF9</code></div><div class="token"><span class="swatch" style="background:#EEE8DA"></span><span class="token-name">--surface-muted</span><code>#EEE8DA</code></div><div class="token"><span class="swatch" style="background:#E4DCCB"></span><span class="token-name">--surface-strong</span><code>#E4DCCB</code></div><div class="token"><span class="swatch" style="background:#1D2118"></span><span class="token-name">--text</span><code>#1D2118</code></div><div class="token"><span class="swatch" style="background:#48503F"></span><span class="token-name">--text-soft</span><code>#48503F</code></div><div class="token"><span class="swatch" style="background:#626A58"></span><span class="token-name">--muted</span><code>#626A58</code></div><div class="token"><span class="swatch" style="background:#DAD2C2"></span><span class="token-name">--border</span><code>#DAD2C2</code></div><div class="token"><span class="swatch" style="background:#928873"></span><span class="token-name">--border-strong</span><code>#928873</code></div><div class="token"><span class="swatch" style="background:#5A6847"></span><span class="token-name">--accent</span><code>#5A6847</code></div><div class="token"><span class="swatch" style="background:#465337"></span><span class="token-name">--accent-hover</span><code>#465337</code></div><div class="token"><span class="swatch" style="background:#FFFBF3"></span><span class="token-name">--accent-contrast</span><code>#FFFBF3</code></div><div class="token"><span class="swatch" style="background:#E8EBDD"></span><span class="token-name">--accent-soft</span><code>#E8EBDD</code></div><div class="token"><span class="swatch" style="background:#D7DDC6"></span><span class="token-name">--accent-soft-strong</span><code>#D7DDC6</code></div><div class="token"><span class="swatch" style="background:#465337"></span><span class="token-name">--focus</span><code>#465337</code></div><div class="token"><span class="swatch" style="background:#3B684B"></span><span class="token-name">--success</span><code>#3B684B</code></div><div class="token"><span class="swatch" style="background:#E6EFE7"></span><span class="token-name">--success-soft</span><code>#E6EFE7</code></div><div class="token"><span class="swatch" style="background:#7C5A1E"></span><span class="token-name">--warning</span><code>#7C5A1E</code></div><div class="token"><span class="swatch" style="background:#F5ECD7"></span><span class="token-name">--warning-soft</span><code>#F5ECD7</code></div><div class="token"><span class="swatch" style="background:#963D34"></span><span class="token-name">--danger</span><code>#963D34</code></div><div class="token"><span class="swatch" style="background:#F7E5E0"></span><span class="token-name">--danger-soft</span><code>#F7E5E0</code></div></div></div>
+      <div class="token-group"><h4>Dark tokens</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#141712"></span><span class="token-name">--bg</span><code>#141712</code></div><div class="token"><span class="swatch" style="background:#1C211A"></span><span class="token-name">--surface</span><code>#1C211A</code></div><div class="token"><span class="swatch" style="background:#252B22"></span><span class="token-name">--surface-raised</span><code>#252B22</code></div><div class="token"><span class="swatch" style="background:#22281E"></span><span class="token-name">--surface-muted</span><code>#22281E</code></div><div class="token"><span class="swatch" style="background:#2F362A"></span><span class="token-name">--surface-strong</span><code>#2F362A</code></div><div class="token"><span class="swatch" style="background:#EFF2E8"></span><span class="token-name">--text</span><code>#EFF2E8</code></div><div class="token"><span class="swatch" style="background:#CDD3C2"></span><span class="token-name">--text-soft</span><code>#CDD3C2</code></div><div class="token"><span class="swatch" style="background:#A0A893"></span><span class="token-name">--muted</span><code>#A0A893</code></div><div class="token"><span class="swatch" style="background:#353D2F"></span><span class="token-name">--border</span><code>#353D2F</code></div><div class="token"><span class="swatch" style="background:#68745E"></span><span class="token-name">--border-strong</span><code>#68745E</code></div><div class="token"><span class="swatch" style="background:#B2BE96"></span><span class="token-name">--accent</span><code>#B2BE96</code></div><div class="token"><span class="swatch" style="background:#C5D0A9"></span><span class="token-name">--accent-hover</span><code>#C5D0A9</code></div><div class="token"><span class="swatch" style="background:#1A2112"></span><span class="token-name">--accent-contrast</span><code>#1A2112</code></div><div class="token"><span class="swatch" style="background:#293322"></span><span class="token-name">--accent-soft</span><code>#293322</code></div><div class="token"><span class="swatch" style="background:#37442C"></span><span class="token-name">--accent-soft-strong</span><code>#37442C</code></div><div class="token"><span class="swatch" style="background:#C5D0A9"></span><span class="token-name">--focus</span><code>#C5D0A9</code></div><div class="token"><span class="swatch" style="background:#9AC7A7"></span><span class="token-name">--success</span><code>#9AC7A7</code></div><div class="token"><span class="swatch" style="background:#1F2F24"></span><span class="token-name">--success-soft</span><code>#1F2F24</code></div><div class="token"><span class="swatch" style="background:#D9B978"></span><span class="token-name">--warning</span><code>#D9B978</code></div><div class="token"><span class="swatch" style="background:#352C1D"></span><span class="token-name">--warning-soft</span><code>#352C1D</code></div><div class="token"><span class="swatch" style="background:#E3A099"></span><span class="token-name">--danger</span><code>#E3A099</code></div><div class="token"><span class="swatch" style="background:#382320"></span><span class="token-name">--danger-soft</span><code>#382320</code></div></div></div>
+    </div>
+    <div class="contrast-wrap">
+      <div class="contrast-col"><h4>Light contrast · WCAG</h4><table class="contrast-table"><thead><tr><th>Pair</th><th>Ratio</th><th>AA</th></tr></thead><tbody><tr><td>Text / page</td><td>14.52:1</td><td class="pass">Pass</td></tr><tr><td>Muted / page</td><td>5.01:1</td><td class="pass">Pass</td></tr><tr><td>Text / card</td><td>15.96:1</td><td class="pass">Pass</td></tr><tr><td>Accent / page</td><td>5.31:1</td><td class="pass">Pass</td></tr><tr><td>Button text / accent</td><td>5.80:1</td><td class="pass">Pass</td></tr><tr><td>Input edge / card</td><td>3.42:1</td><td class="pass">Pass</td></tr><tr><td>Success / soft</td><td>5.47:1</td><td class="pass">Pass</td></tr><tr><td>Warning / soft</td><td>5.35:1</td><td class="pass">Pass</td></tr><tr><td>Error / soft</td><td>5.72:1</td><td class="pass">Pass</td></tr><tr><td>Focus / page</td><td>7.30:1</td><td class="pass">Pass</td></tr></tbody></table></div>
+      <div class="contrast-col"><h4>Dark contrast · WCAG</h4><table class="contrast-table"><thead><tr><th>Pair</th><th>Ratio</th><th>AA</th></tr></thead><tbody><tr><td>Text / page</td><td>15.97:1</td><td class="pass">Pass</td></tr><tr><td>Muted / page</td><td>7.34:1</td><td class="pass">Pass</td></tr><tr><td>Text / card</td><td>14.46:1</td><td class="pass">Pass</td></tr><tr><td>Accent / page</td><td>9.21:1</td><td class="pass">Pass</td></tr><tr><td>Button text / accent</td><td>8.42:1</td><td class="pass">Pass</td></tr><tr><td>Input edge / card</td><td>3.31:1</td><td class="pass">Pass</td></tr><tr><td>Success / soft</td><td>7.45:1</td><td class="pass">Pass</td></tr><tr><td>Warning / soft</td><td>7.30:1</td><td class="pass">Pass</td></tr><tr><td>Error / soft</td><td>6.82:1</td><td class="pass">Pass</td></tr><tr><td>Focus / page</td><td>11.17:1</td><td class="pass">Pass</td></tr></tbody></table></div>
+    </div>
+  </article>
+<article class="palette-card" id="palette-teal">
+    <div class="palette-head">
+      <span class="num">03</span>
+      <div><h3>Teal & Stone <span>Cool, premium, precise</span></h3><p>A deep teal on warm stone is quieter than a tech blue and more exact than a green. It feels premium without turning cold, because the neutral family stays sandy rather than gray.</p></div>
+    </div>
+    <div class="scales">
+      <div class="scale-block"><h4>Accent scale</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#DFEAE7"></span><span class="token-name">--accent-100</span><code>#DFEAE7</code></div><div class="token"><span class="swatch" style="background:#A9CCC5"></span><span class="token-name">--accent-300</span><code>#A9CCC5</code></div><div class="token"><span class="swatch" style="background:#2E655E"></span><span class="token-name">--accent-500</span><code>#2E655E</code></div><div class="token"><span class="swatch" style="background:#234E48"></span><span class="token-name">--accent-700</span><code>#234E48</code></div><div class="token"><span class="swatch" style="background:#14332F"></span><span class="token-name">--accent-900</span><code>#14332F</code></div></div></div>
+      <div class="scale-block"><h4>Neutral tint</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#F4F0E8"></span><span class="token-name">--neutral-100</span><code>#F4F0E8</code></div><div class="token"><span class="swatch" style="background:#E1DCD1"></span><span class="token-name">--neutral-300</span><code>#E1DCD1</code></div><div class="token"><span class="swatch" style="background:#A9A99D"></span><span class="token-name">--neutral-500</span><code>#A9A99D</code></div><div class="token"><span class="swatch" style="background:#5D6964"></span><span class="token-name">--neutral-700</span><code>#5D6964</code></div><div class="token"><span class="swatch" style="background:#1A2321"></span><span class="token-name">--neutral-900</span><code>#1A2321</code></div></div></div>
+    </div>
+    <div class="demo-grid">
+      <div class="mock-wrap"><span class="demo-label">Light mode</span><div class="pv pv-teal-light" dir="rtl">
+    <div class="pv-nav">
+      <div class="pv-brand"><span class="pv-brand-dot"></span><span>بصيرة</span></div>
+      <div class="pv-links"><span class="pv-active">الرئيسية</span><span>الخدمات</span><span>عن بصيرة</span></div>
+      <button class="pv-btn pv-btn-ghost">تسجيل الدخول</button>
+    </div>
+    <div class="pv-body">
+      <div class="pv-card">
+        <div class="pv-card-top"><span class="pv-kicker">أداة التحقق</span><span class="pv-chip pv-chip-success">مدعوم بالمصادر</span></div>
+        <h4>التحقق من المعلومات</h4>
+        <p>ضع النص أمامك، واعرف ما إذا كانت المصادر تدعمه أم تحتاج إلى مراجعة.</p>
+        <label>البريد الإلكتروني</label>
+        <div class="pv-input">أدخل بريدك الإلكتروني…</div>
+        <div class="pv-actions"><button class="pv-btn pv-btn-primary">ابدأ التحقق</button><button class="pv-btn pv-btn-secondary">مثال</button></div>
+      </div>
+      <div class="pv-chat">
+        <div class="pv-chat-head"><span class="pv-chat-avatar"></span><strong>المساعد المعرفي</strong><span class="pv-status">جاهز</span></div>
+        <div class="pv-bubble pv-user">ما تفسير قوله تعالى: ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾؟</div>
+        <div class="pv-bubble pv-assistant">الآية تبشّر المؤمن بأن مع العسر يسرًا، وتدعوه إلى الصبر والرجاء. <span class="pv-cite">(مصدر 1)</span><div class="pv-source">تفسير — سورة الشرح</div></div>
+        <div class="pv-composer">اكتب سؤالك الشرعي… <span class="pv-send">إرسال</span></div>
+      </div>
+      <div class="pv-semantics"><span class="pv-chip pv-chip-success">تم التحقق</span><span class="pv-chip pv-chip-warning">يحتاج مراجعة</span><span class="pv-chip pv-chip-danger">تعذّر الاتصال</span></div>
+    </div>
+  </div></div>
+      <div class="mock-wrap"><span class="demo-label">Dark mode</span><div class="pv pv-teal-dark" dir="rtl">
+    <div class="pv-nav">
+      <div class="pv-brand"><span class="pv-brand-dot"></span><span>بصيرة</span></div>
+      <div class="pv-links"><span class="pv-active">الرئيسية</span><span>الخدمات</span><span>عن بصيرة</span></div>
+      <button class="pv-btn pv-btn-ghost">تسجيل الدخول</button>
+    </div>
+    <div class="pv-body">
+      <div class="pv-card">
+        <div class="pv-card-top"><span class="pv-kicker">أداة التحقق</span><span class="pv-chip pv-chip-success">مدعوم بالمصادر</span></div>
+        <h4>التحقق من المعلومات</h4>
+        <p>ضع النص أمامك، واعرف ما إذا كانت المصادر تدعمه أم تحتاج إلى مراجعة.</p>
+        <label>البريد الإلكتروني</label>
+        <div class="pv-input">أدخل بريدك الإلكتروني…</div>
+        <div class="pv-actions"><button class="pv-btn pv-btn-primary">ابدأ التحقق</button><button class="pv-btn pv-btn-secondary">مثال</button></div>
+      </div>
+      <div class="pv-chat">
+        <div class="pv-chat-head"><span class="pv-chat-avatar"></span><strong>المساعد المعرفي</strong><span class="pv-status">جاهز</span></div>
+        <div class="pv-bubble pv-user">ما تفسير قوله تعالى: ﴿إِنَّ مَعَ الْعُسْرِ يُسْرًا﴾؟</div>
+        <div class="pv-bubble pv-assistant">الآية تبشّر المؤمن بأن مع العسر يسرًا، وتدعوه إلى الصبر والرجاء. <span class="pv-cite">(مصدر 1)</span><div class="pv-source">تفسير — سورة الشرح</div></div>
+        <div class="pv-composer">اكتب سؤالك الشرعي… <span class="pv-send">إرسال</span></div>
+      </div>
+      <div class="pv-semantics"><span class="pv-chip pv-chip-success">تم التحقق</span><span class="pv-chip pv-chip-warning">يحتاج مراجعة</span><span class="pv-chip pv-chip-danger">تعذّر الاتصال</span></div>
+    </div>
+  </div></div>
+    </div>
+    <div class="tokens-wrap">
+      <div class="token-group"><h4>Light tokens</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#F4F0E8"></span><span class="token-name">--bg</span><code>#F4F0E8</code></div><div class="token"><span class="swatch" style="background:#FFFCF7"></span><span class="token-name">--surface</span><code>#FFFCF7</code></div><div class="token"><span class="swatch" style="background:#FFFEFA"></span><span class="token-name">--surface-raised</span><code>#FFFEFA</code></div><div class="token"><span class="swatch" style="background:#ECE8DF"></span><span class="token-name">--surface-muted</span><code>#ECE8DF</code></div><div class="token"><span class="swatch" style="background:#E1DCD1"></span><span class="token-name">--surface-strong</span><code>#E1DCD1</code></div><div class="token"><span class="swatch" style="background:#1A2321"></span><span class="token-name">--text</span><code>#1A2321</code></div><div class="token"><span class="swatch" style="background:#44514D"></span><span class="token-name">--text-soft</span><code>#44514D</code></div><div class="token"><span class="swatch" style="background:#5D6964"></span><span class="token-name">--muted</span><code>#5D6964</code></div><div class="token"><span class="swatch" style="background:#D6D2C8"></span><span class="token-name">--border</span><code>#D6D2C8</code></div><div class="token"><span class="swatch" style="background:#879086"></span><span class="token-name">--border-strong</span><code>#879086</code></div><div class="token"><span class="swatch" style="background:#2E655E"></span><span class="token-name">--accent</span><code>#2E655E</code></div><div class="token"><span class="swatch" style="background:#234E48"></span><span class="token-name">--accent-hover</span><code>#234E48</code></div><div class="token"><span class="swatch" style="background:#F7FBF8"></span><span class="token-name">--accent-contrast</span><code>#F7FBF8</code></div><div class="token"><span class="swatch" style="background:#DFEAE7"></span><span class="token-name">--accent-soft</span><code>#DFEAE7</code></div><div class="token"><span class="swatch" style="background:#C9DDD8"></span><span class="token-name">--accent-soft-strong</span><code>#C9DDD8</code></div><div class="token"><span class="swatch" style="background:#234E48"></span><span class="token-name">--focus</span><code>#234E48</code></div><div class="token"><span class="swatch" style="background:#3B684B"></span><span class="token-name">--success</span><code>#3B684B</code></div><div class="token"><span class="swatch" style="background:#E6EFE7"></span><span class="token-name">--success-soft</span><code>#E6EFE7</code></div><div class="token"><span class="swatch" style="background:#7C5A1E"></span><span class="token-name">--warning</span><code>#7C5A1E</code></div><div class="token"><span class="swatch" style="background:#F5ECD7"></span><span class="token-name">--warning-soft</span><code>#F5ECD7</code></div><div class="token"><span class="swatch" style="background:#963D34"></span><span class="token-name">--danger</span><code>#963D34</code></div><div class="token"><span class="swatch" style="background:#F7E5E0"></span><span class="token-name">--danger-soft</span><code>#F7E5E0</code></div></div></div>
+      <div class="token-group"><h4>Dark tokens</h4><div class="token-grid"><div class="token"><span class="swatch" style="background:#111716"></span><span class="token-name">--bg</span><code>#111716</code></div><div class="token"><span class="swatch" style="background:#19201E"></span><span class="token-name">--surface</span><code>#19201E</code></div><div class="token"><span class="swatch" style="background:#222926"></span><span class="token-name">--surface-raised</span><code>#222926</code></div><div class="token"><span class="swatch" style="background:#1F2725"></span><span class="token-name">--surface-muted</span><code>#1F2725</code></div><div class="token"><span class="swatch" style="background:#2B3430"></span><span class="token-name">--surface-strong</span><code>#2B3430</code></div><div class="token"><span class="swatch" style="background:#EAF0ED"></span><span class="token-name">--text</span><code>#EAF0ED</code></div><div class="token"><span class="swatch" style="background:#C6D0CB"></span><span class="token-name">--text-soft</span><code>#C6D0CB</code></div><div class="token"><span class="swatch" style="background:#9AA7A1"></span><span class="token-name">--muted</span><code>#9AA7A1</code></div><div class="token"><span class="swatch" style="background:#303A36"></span><span class="token-name">--border</span><code>#303A36</code></div><div class="token"><span class="swatch" style="background:#67756F"></span><span class="token-name">--border-strong</span><code>#67756F</code></div><div class="token"><span class="swatch" style="background:#8FC1B8"></span><span class="token-name">--accent</span><code>#8FC1B8</code></div><div class="token"><span class="swatch" style="background:#A5D3CA"></span><span class="token-name">--accent-hover</span><code>#A5D3CA</code></div><div class="token"><span class="swatch" style="background:#10211D"></span><span class="token-name">--accent-contrast</span><code>#10211D</code></div><div class="token"><span class="swatch" style="background:#20332F"></span><span class="token-name">--accent-soft</span><code>#20332F</code></div><div class="token"><span class="swatch" style="background:#2C453F"></span><span class="token-name">--accent-soft-strong</span><code>#2C453F</code></div><div class="token"><span class="swatch" style="background:#A5D3CA"></span><span class="token-name">--focus</span><code>#A5D3CA</code></div><div class="token"><span class="swatch" style="background:#9AC7A7"></span><span class="token-name">--success</span><code>#9AC7A7</code></div><div class="token"><span class="swatch" style="background:#1F2F24"></span><span class="token-name">--success-soft</span><code>#1F2F24</code></div><div class="token"><span class="swatch" style="background:#D9B978"></span><span class="token-name">--warning</span><code>#D9B978</code></div><div class="token"><span class="swatch" style="background:#352C1D"></span><span class="token-name">--warning-soft</span><code>#352C1D</code></div><div class="token"><span class="swatch" style="background:#E3A099"></span><span class="token-name">--danger</span><code>#E3A099</code></div><div class="token"><span class="swatch" style="background:#382320"></span><span class="token-name">--danger-soft</span><code>#382320</code></div></div></div>
+    </div>
+    <div class="contrast-wrap">
+      <div class="contrast-col"><h4>Light contrast · WCAG</h4><table class="contrast-table"><thead><tr><th>Pair</th><th>Ratio</th><th>AA</th></tr></thead><tbody><tr><td>Text / page</td><td>14.14:1</td><td class="pass">Pass</td></tr><tr><td>Muted / page</td><td>5.03:1</td><td class="pass">Pass</td></tr><tr><td>Text / card</td><td>15.71:1</td><td class="pass">Pass</td></tr><tr><td>Accent / page</td><td>5.89:1</td><td class="pass">Pass</td></tr><tr><td>Button text / accent</td><td>6.41:1</td><td class="pass">Pass</td></tr><tr><td>Input edge / card</td><td>3.22:1</td><td class="pass">Pass</td></tr><tr><td>Success / soft</td><td>5.47:1</td><td class="pass">Pass</td></tr><tr><td>Warning / soft</td><td>5.35:1</td><td class="pass">Pass</td></tr><tr><td>Error / soft</td><td>5.72:1</td><td class="pass">Pass</td></tr><tr><td>Focus / page</td><td>8.19:1</td><td class="pass">Pass</td></tr></tbody></table></div>
+      <div class="contrast-col"><h4>Dark contrast · WCAG</h4><table class="contrast-table"><thead><tr><th>Pair</th><th>Ratio</th><th>AA</th></tr></thead><tbody><tr><td>Text / page</td><td>15.70:1</td><td class="pass">Pass</td></tr><tr><td>Muted / page</td><td>7.27:1</td><td class="pass">Pass</td></tr><tr><td>Text / card</td><td>14.36:1</td><td class="pass">Pass</td></tr><tr><td>Accent / page</td><td>9.06:1</td><td class="pass">Pass</td></tr><tr><td>Button text / accent</td><td>8.34:1</td><td class="pass">Pass</td></tr><tr><td>Input edge / card</td><td>3.43:1</td><td class="pass">Pass</td></tr><tr><td>Success / soft</td><td>7.45:1</td><td class="pass">Pass</td></tr><tr><td>Warning / soft</td><td>7.30:1</td><td class="pass">Pass</td></tr><tr><td>Error / soft</td><td>6.82:1</td><td class="pass">Pass</td></tr><tr><td>Focus / page</td><td>11.03:1</td><td class="pass">Pass</td></tr></tbody></table></div>
+    </div>
+  </article>
+    </section>
+
+    <p class="note">Choose one logo concept and one palette. You may mix a logo from one direction with a palette from another. I will only apply your choice after you reply.</p>
+    <footer>Preview only. No app pages, backend files, or API contracts have been changed.</footer>
+  </div>
+
+  <svg class="svg-defs" aria-hidden="true"><defs>
+    <symbol id="mark-nuqta" viewBox="0 0 48 48"><path d="M8 17.5C8 29.5 40 29.5 40 17.5" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round"/><circle cx="24" cy="38" r="4.4" fill="currentColor"/></symbol><symbol id="mark-sanad" viewBox="0 0 48 48"><path d="M11 10H31L39 18V38H11V10Z" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round"/><path d="M31 10V18H39" fill="none" stroke="currentColor" stroke-width="4.5" stroke-linejoin="round"/><circle cx="24" cy="28" r="3.4" fill="currentColor"/></symbol><symbol id="mark-masar" viewBox="0 0 48 48"><path d="M14 38C14 26 34 26 34 12" fill="none" stroke="currentColor" stroke-width="5.5" stroke-linecap="round"/><circle cx="14" cy="38" r="4.4" fill="currentColor"/><circle cx="34" cy="12" r="4.4" fill="none" stroke="currentColor" stroke-width="4.4"/></symbol>
+  </defs></svg>
+</body>
+</html>
