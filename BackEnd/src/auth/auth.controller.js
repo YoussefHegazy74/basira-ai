@@ -48,7 +48,7 @@ const resetPassword = asyncWrapper(async (req, res, next) => {
   });
 });
 const changePassword = asyncWrapper(async (req, res, next) => {
-  const { token } = await AuthService.changePassword(
+  const  token  = await AuthService.changePassword(
     req.user._id,
     req.body.currentPassword,
     req.body.newPassword,
