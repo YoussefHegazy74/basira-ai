@@ -133,7 +133,7 @@ The latest stable runs (`live_20261021T183711Z_final5` and
 - [x] Embeddings & Vector DB
 - [x] RAG system (offline-validated; live `gpt-4o-mini` evaluation)
 - [x] Backend (FastAPI & Node.js)
-- [ ] Frontend (React)
+- [x] Frontend (React)
 - [ ] Cybersecurity layer
 
 ---
