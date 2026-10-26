@@ -1711,13 +1711,16 @@ def test_rag02_verify_validation() -> None:
     ]
     orig_search = V._dual_search
     try:
-        def run(payload, res=results, text=_RAG02_VERIFY_TEXT):
+        def run(payload, res=results, text=_RAG02_VERIFY_TEXT,
+                explanation="شرح"):
             V._dual_search = (
                 lambda t, c, i, ch, top_k, debug=False: list(res)
             )
             chat = _FakeChat({}, payload)
             try:
-                return V.verify_full(text, "شرح", object(), corpus, chat)
+                return V.verify_full(
+                    text, explanation, object(), corpus, chat,
+                )
             finally:
                 V._dual_search = orig_search
 
@@ -1751,12 +1754,15 @@ def test_rag02_verify_validation() -> None:
 
         out = run(payload(text_status="ممتاز", danger_level="خطر شديد",
                           explanation_status="ربما"))
-        check("invalid text_status falls back to غير موجود",
-              out["text_status"] == "غير موجود")
-        check("invalid danger_level falls back to منخفضة",
-              out["danger_level"] == "منخفضة")
-        check("invalid explanation_status falls back to لا يوجد",
-              out["explanation_status"] == "لا يوجد")
+        check("invalid text_status falls back to the safe unknown state",
+              out["text_status"] == "غير مؤكد")
+        check("invalid danger_level with an uncertain interpretation is not scored",
+              out["danger_level"] == "غير محسوبة"
+              and out["danger_level_applicable"] is False)
+        check("invalid explanation_status falls back to غير مؤكد",
+              out["explanation_status"] == "غير مؤكد")
+        check("uncertain interpretation is reported as inconclusive",
+              out["interpretation"]["status"] == "inconclusive")
 
         verdict = "الشرح موافق لأن النص يثبت أن ثواب العمل بالنيات"
         out = run(payload(explanation_verdict=verdict))
@@ -1780,33 +1786,52 @@ def test_rag02_verify_validation() -> None:
         # Falsifiable: pre-fix returned text_status صحيح with no evidence.
         out = run(payload(text_status="صحيح", source="صحيح البخاري 1",
                           correct_explanation=_RAG02_VERIFY_MATN), res=[])
-        check("empty retrieval forces a safe verdict",
-              out["text_status"] == "غير موجود")
+        check("empty retrieval is inconclusive, not a false absence verdict",
+              out["text_status"] == "غير مؤكد"
+              and out["verification_status"] == "inconclusive")
         check("empty retrieval yields an empty source", out["source"] == "")
         check("empty retrieval cannot ground prose",
               out["correct_explanation"] == "")
+        check("empty retrieval does not invent a risk score",
+              out["danger_level"] == "غير محسوبة"
+              and out["danger_level_applicable"] is False)
 
         out = run("not json", text="الدين النصيحة")
-        check("malformed JSON yields the safe defaults",
-              out["text_status"] == "غير موجود"
-              and out["danger_level"] == "منخفضة"
-              and out["explanation_status"] == "لا يوجد")
+        check("malformed JSON yields safe unknown defaults",
+              out["text_status"] == "غير مؤكد"
+              and out["danger_level"] == "غير محسوبة"
+              and out["explanation_status"] == "غير مؤكد")
         check("malformed JSON keeps is_truncated boolean",
               isinstance(out["is_truncated"], bool))
 
         out = run(payload(source="صحيح البخاري: ١",
                           correct_explanation=_RAG02_VERIFY_MATN))
-        check("verify response exposes exactly the 11 contract keys",
-              set(out) == {
-                  "text_status", "is_truncated", "missing_part", "full_text",
-                  "source", "danger_level", "explanation_status",
-                  "explanation_verdict", "correct_explanation",
-                  "input_text", "input_explanation",
-              })
-        check("is_truncated is bool; all other values are strings",
+        legacy_keys = {
+            "text_status", "is_truncated", "missing_part", "full_text",
+            "source", "danger_level", "explanation_status",
+            "explanation_verdict", "correct_explanation",
+            "input_text", "input_explanation",
+        }
+        structured_keys = {
+            "verification_status", "status_label", "status_explanation",
+            "quotation", "interpretation", "evidence",
+            "danger_level_meaning", "danger_level_applicable",
+            "retrieval_ok", "verification_error",
+        }
+        check("verify response keeps the legacy contract and adds structure",
+              legacy_keys <= set(out) and structured_keys <= set(out))
+        check("is_truncated is bool; legacy text fields are strings",
               isinstance(out["is_truncated"], bool)
-              and all(isinstance(out[k], str) for k in out
+              and all(isinstance(out[k], str) for k in legacy_keys
                       if k != "is_truncated"))
+        check("structured quotation and interpretation are objects",
+              isinstance(out["quotation"], dict)
+              and isinstance(out["interpretation"], dict)
+              and isinstance(out["evidence"], list))
+        no_explanation = run(payload(), explanation="")
+        check("interpretation label states that no explanation was supplied",
+              no_explanation["interpretation"]["label"]
+              == "لم يتم تقديم تفسير لتقييمه")
     finally:
         V._dual_search = orig_search
 

@@ -219,7 +219,8 @@ const sendUserMessage = async ({
     ) {
       throw new AppError(
         403,
-        "Conversation message limit reached, please start a new chat",
+        "تم الوصول إلى الحد الأقصى لعدد الرسائل في هذه المحادثة. "
+          + "ابدأ محادثة جديدة للمتابعة.",
         HttpStatus.FAIL,
       );
     }

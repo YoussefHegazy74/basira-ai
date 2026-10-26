@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   BrowserRouter,
   Link,
@@ -15,6 +15,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import SignIn from "./pages/SignIn";
 import SignUp from "./pages/SignUp";
 import Navbar from "./components/Navbar";
+import ChatSidebar from "./components/ChatSidebar";
 import Footer from "./components/Footer";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Home from "./pages/Home";
@@ -146,11 +147,54 @@ function ScrollAndReveal() {
   return null;
 }
 
+const CHAT_SIDEBAR_KEY = "basira.chat-sidebar";
+
+function readChatSidebarCollapsed() {
+  if (typeof window === "undefined") return true;
+
+  try {
+    const stored = localStorage.getItem(CHAT_SIDEBAR_KEY);
+    if (stored === "collapsed") return true;
+    if (stored === "expanded") return false;
+  } catch {
+    /* storage unavailable */
+  }
+
+  return !window.matchMedia?.("(min-width: 1024px)")?.matches;
+}
+
 function AppLayout() {
   const { pathname } = useLocation();
   const isChat = pathname === "/chat";
+  const [chatSidebarCollapsed, setChatSidebarCollapsed] = useState(
+    readChatSidebarCollapsed
+  );
+  const [chatDrawerOpen, setChatDrawerOpen] = useState(false);
 
   usePageMeta();
+
+  useEffect(() => {
+    setChatDrawerOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!isChat) return;
+    try {
+      localStorage.setItem(
+        CHAT_SIDEBAR_KEY,
+        chatSidebarCollapsed ? "collapsed" : "expanded"
+      );
+    } catch {
+      /* storage unavailable */
+    }
+  }, [chatSidebarCollapsed, isChat]);
+
+  function closeChatDrawer() {
+    setChatDrawerOpen(false);
+    window.requestAnimationFrame(() => {
+      document.getElementById("chat-sidebar-open")?.focus();
+    });
+  }
 
   return (
     <>
@@ -160,55 +204,85 @@ function AppLayout() {
       <ScrollAndReveal />
       <div className="app-shell">
         <Navbar />
-        <div
-          className={`app-main${isChat ? " app-main-chat" : ""}`}
-          id="main-content"
-          tabIndex={-1}
-        >
-          <div className="app-content">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/about" element={<About />} />
-              <Route path="/services" element={<Services />} />
+        <div className={`app-body${isChat ? " app-body-chat" : ""}`}>
+          {isChat ? (
+            <ChatSidebar
+              collapsed={chatSidebarCollapsed}
+              mobileOpen={chatDrawerOpen}
+              onToggleCollapsed={() =>
+                setChatSidebarCollapsed((current) => !current)
+              }
+              onCloseMobile={() => setChatDrawerOpen(false)}
+            />
+          ) : null}
 
-              <Route
-                path="/signin"
-                element={
-                  <GuestRoute>
-                    <SignIn />
-                  </GuestRoute>
-                }
-              />
-              <Route
-                path="/signup"
-                element={
-                  <GuestRoute>
-                    <SignUp />
-                  </GuestRoute>
-                }
-              />
-              <Route path="/forgot-password" element={<ForgotPassword />} />
+          {isChat && chatDrawerOpen ? (
+            <button
+              type="button"
+              className="chat-sidebar-backdrop"
+              aria-label="إغلاق قائمة المحادثات"
+              onClick={closeChatDrawer}
+            />
+          ) : null}
 
-              <Route
-                path="/admin"
-                element={
-                  <AdminRoute>
-                    <AdminDashboard />
-                  </AdminRoute>
-                }
-              />
+          <div
+            className={`app-main${isChat ? " app-main-chat" : ""}`}
+            id="main-content"
+            tabIndex={-1}
+          >
+            <div className="app-content">
+              <Routes>
+                <Route path="/" element={<Home />} />
+                <Route path="/about" element={<About />} />
+                <Route path="/services" element={<Services />} />
 
-              <Route path="/profile" element={<Profile />} />
-              <Route path="/chat" element={<Chat />} />
-              <Route path="/verify" element={<Verify />} />
-              <Route path="/tafsir" element={<Tafsir />} />
-              <Route
-                path="/auth/resetpassword/:token"
-                element={<ResetPassword />}
-              />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-            {!isChat ? <Footer /> : null}
+                <Route
+                  path="/signin"
+                  element={
+                    <GuestRoute>
+                      <SignIn />
+                    </GuestRoute>
+                  }
+                />
+                <Route
+                  path="/signup"
+                  element={
+                    <GuestRoute>
+                      <SignUp />
+                    </GuestRoute>
+                  }
+                />
+                <Route path="/forgot-password" element={<ForgotPassword />} />
+
+                <Route
+                  path="/admin"
+                  element={
+                    <AdminRoute>
+                      <AdminDashboard />
+                    </AdminRoute>
+                  }
+                />
+
+                <Route path="/profile" element={<Profile />} />
+                <Route
+                  path="/chat"
+                  element={
+                    <Chat
+                      chatSidebarOpen={chatDrawerOpen}
+                      onOpenChatSidebar={() => setChatDrawerOpen(true)}
+                    />
+                  }
+                />
+                <Route path="/verify" element={<Verify />} />
+                <Route path="/tafsir" element={<Tafsir />} />
+                <Route
+                  path="/auth/resetpassword/:token"
+                  element={<ResetPassword />}
+                />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+              {!isChat ? <Footer /> : null}
+            </div>
           </div>
         </div>
       </div>

@@ -13,15 +13,17 @@ import {
   writeActiveConversation,
   writeFailedSubmission,
 } from "../utils/chatHistory";
-import { citationSegments, formatSourceLabel } from "../utils/citations";
+import {
+  citationSegments,
+  displaySourceLabels,
+} from "../utils/citations";
 import { arabicMessage, formatNumber } from "../utils/format";
+import { chatRequestErrorMessage } from "../utils/chatErrors";
 import Modal, { ConfirmDialog } from "../components/Modal";
 import "../styles/chat.css";
 
 function sourceLabelsFor(item) {
-  return (Array.isArray(item?.sources) ? item.sources : [])
-    .map(formatSourceLabel)
-    .filter(Boolean);
+  return displaySourceLabels(item?.text || "", item?.sources || []);
 }
 
 function conversationTitle(item) {
@@ -44,7 +46,7 @@ function fallbackCopy(text) {
   }
 }
 
-function Chat() {
+function Chat({ chatSidebarOpen, onOpenChatSidebar }) {
   const { user, authLoading } = useAuth();
 
   const [message, setMessage] = useState("");
@@ -455,14 +457,6 @@ function Chat() {
     }
   }
 
-  function errorMessage(requestError) {
-    return arabicMessage(
-      requestError.response?.data?.message ||
-        requestError.response?.data?.error?.message,
-      "تعذّر الاتصال بالخدمة الآن. تحقق من اتصالك ثم حاول مرة أخرى."
-    );
-  }
-
   async function requestChat({
     text,
     clientMessageId,
@@ -549,7 +543,7 @@ function Chat() {
           }
         : null
     );
-    setError(errorMessage(requestError));
+    setError(chatRequestErrorMessage(requestError));
   }
 
   async function handleSubmit(event) {
@@ -832,16 +826,6 @@ function Chat() {
   const composer = (
     <form className="chat-composer" onSubmit={handleSubmit}>
       <div className={`composer-pill${message.trim() ? " has-text" : ""}`}>
-        <button
-          type="button"
-          className="composer-icon"
-          disabled
-          aria-label="إرفاق ملف، غير متاح بعد"
-          title="إرفاق ملف، غير متاح بعد"
-        >
-          <i className="bi bi-plus-lg" aria-hidden="true"></i>
-        </button>
-
         <label className="sr-only" htmlFor="chat-message">
           رسالتك
         </label>
@@ -867,16 +851,6 @@ function Chat() {
 
         <div className="composer-actions">
           <button
-            type="button"
-            className="composer-icon"
-            disabled
-            aria-label="الإدخال الصوتي، غير متاح بعد"
-            title="الإدخال الصوتي، غير متاح بعد"
-          >
-            <i className="bi bi-mic" aria-hidden="true"></i>
-          </button>
-
-          <button
             className={`composer-send${message.trim() ? " is-ready" : ""}`}
             type="submit"
             disabled={!message.trim() || isLoading || isOpeningConversation}
@@ -897,6 +871,19 @@ function Chat() {
 
   return (
     <main className="chat-app" aria-label="المحادثة" tabIndex={-1}>
+      <button
+        type="button"
+        id="chat-sidebar-open"
+        className="chat-sidebar-open"
+        onClick={onOpenChatSidebar}
+        aria-label="فتح قائمة المحادثات"
+        title="فتح قائمة المحادثات"
+        aria-expanded={Boolean(chatSidebarOpen)}
+        aria-controls="chat-sidebar"
+      >
+        <i className="bi bi-layout-sidebar-inset" aria-hidden="true"></i>
+      </button>
+
       <h1 className="sr-only">المحادثة</h1>
       <div
         className={`chat-stage ${hasMessages ? "has-thread" : "is-empty"}`}
@@ -963,6 +950,9 @@ function Chat() {
                       key={item.id}
                     >
                       <div className="assistant-message">
+                        <span className="assistant-avatar" aria-hidden="true">
+                          <i className="bi bi-stars"></i>
+                        </span>
                         <p className="assistant-text" dir="auto">
                           {renderMessageText(item)}
                         </p>
@@ -1112,13 +1102,21 @@ function Chat() {
 
                 {isLoading ? (
                   <article className="message-row assistant typing-row">
-                    <div className="typing-state" role="status">
-                      <span className="typing-dots" aria-hidden="true">
-                        <span></span>
-                        <span></span>
-                        <span></span>
+                    <div className="assistant-message">
+                      <span
+                        className="assistant-avatar"
+                        aria-hidden="true"
+                      >
+                        <i className="bi bi-stars"></i>
                       </span>
-                      <span className="sr-only">بصيرة تكتب الآن…</span>
+                      <div className="typing-state" role="status">
+                        <span className="typing-dots" aria-hidden="true">
+                          <span></span>
+                          <span></span>
+                          <span></span>
+                        </span>
+                        <span className="sr-only">بصيرة تكتب الآن…</span>
+                      </div>
                     </div>
                   </article>
                 ) : null}

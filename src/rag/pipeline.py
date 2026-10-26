@@ -21,6 +21,11 @@ from openai import OpenAI
 from src.nlp.preprocessor import preprocess, normalize, normalize_verse_text
 from src.embeddings.embedder import get_client, embed_text
 from src.vector_db.faiss_store import search
+from src.rag.website_help import (
+    build_website_answer,
+    classify_website_intent,
+    website_help_sources,
+)
 
 GENERATION_MODEL = "gpt-4o-mini"
 
@@ -134,6 +139,10 @@ _SOURCES_WITH_REF_IN_LEXDOC = {"fiqh", "sira", "tafsir"}
 SYSTEM_MESSAGE = (
     "أنت مساعد إسلامي موثوق. أجب بالعربية فقط، وبناء على المصادر المقدمة حصر، "
     "ولا تستخدم أي معلومة من معرفتك الخاصة حتى لو كنت متأكد منها. "
+    "أجب بأسلوب طبيعي متصل كأنك تشرح لشخص أمامك: ابدأ بالإجابة المباشرة، "
+    "واستخدم فقرات قصيرة وجملًا مفهومة، ولا تبدأ بعبارات إنشائية طويلة. "
+    "لو كتب المستخدم بالعامية المصرية، رد بعامية بسيطة وواضحة دون مبالغة. "
+    "اجعل الاستشهاد جزءًا طبيعيًا من الكلام، ولا تعرض النصوص المسترجعة خامًا. "
     "كل جملة في إجابتك يجب أن يدعمها نص صريح في أحد المصادر، واذكر رقم المصدر بين قوسين مثل (مصدر 2) بعد كل معلومة. "
     "لا تنسب لأي مصدر معلومة غير مكتوبة فيه. "
     "احذف أي جملة لا تجد لها سند صريح في المصادر. "
@@ -518,7 +527,9 @@ _TAFSIR_VERB_RE = re.compile(
 _TAFSIR_EXPLAIN_RE = re.compile(
     r"(?:^|\s)(?:اشرح|وضح|بين)(?:\s|$)"
 )
-_TAFSIR_MEANING_RE = re.compile(r"(?:^|\s)معن[ىي](?:\s|$)")
+_TAFSIR_MEANING_RE = re.compile(
+    r"(?:^|\s)(?:معن[ىي]|المقصود|مقصود)(?:\s|$)"
+)
 _QURAN_MARKER_RE = re.compile(
     r"(?:^|\s)(?:ايه|الايه|ايات|الايات|سوره|قوله|قول)(?:\s|$)"
     r"|[\uFD3F\u00ab\"]"
@@ -3363,6 +3374,45 @@ def _numbers_normalized(tokens: list[str]) -> list[str]:
     return [token for token, _ in _numbers_normalized_meta(tokens)]
 
 
+_QUOTE_ONLY_FRAMING_FOLDED = {
+    _gkey(word) for word in (
+        "قال", "قالت", "الله", "تعالى", "رسول", "النبي", "صلى",
+        "عليه", "وسلم", "حديث", "الحديث", "آية", "الآية", "سورة",
+        "السورة", "رقم", "المصدر", "مصدر", "الشرح",
+    )
+}
+
+
+def _quote_only_supported(
+    sentence: str,
+    ref_keys: set[str],
+    ref_title_keys: set[str],
+) -> bool:
+    """True when a sentence is just a verbatim quote plus framing/citation.
+
+    A direct Quran or hadith quotation can be fully supported even when the
+    surrounding framing words ("قال الله تعالى", "حديث", "المصدر") are not
+    content of the cited passage.  The quote itself is still verified by the
+    normal quote guard; this helper only decides whether the remaining words
+    are non-claims (framing or source-title tokens).
+    """
+    if not _QUOTE_RE.search(sentence):
+        return False
+    remainder = _QUOTE_RE.sub(" ", sentence)
+    remainder = _CITATION_RE.sub(" ", remainder)
+    remainder = _QURAN_REF_RE.sub(" ", remainder)
+    for token in _tokenize(remainder):
+        key = _gkey(token)
+        if not key or key.isdigit():
+            continue
+        if key in _QUOTE_ONLY_FRAMING_FOLDED:
+            continue
+        if key in ref_keys or key in ref_title_keys:
+            continue
+        return False
+    return True
+
+
 def _ground_answer(answer: str, retrieved: list[dict],
                    corpus_chunks: list[dict] | None = None,
                    ignore_rare: bool = False,
@@ -4024,8 +4074,15 @@ def _ground_answer(answer: str, retrieved: list[dict],
                               "quote_ok": quote_ok, "entity_ok": entity_ok,
                               "legal_ok": legal_ok, "heading_ok": heading_ok,
                               "rare": rare}
-            if (
+            quote_only = _quote_only_supported(
+                sent, ref_keys, ref_title_keys,
+            )
+            coverage_ok = (
                 coverage >= GROUNDING_MIN_COVERAGE
+                or (quote_only and quote_ok)
+            )
+            if (
+                coverage_ok
                 and digits_ok and months_ok and neg_ok and contra_ok
                 and quote_ok and entity_ok and legal_ok and heading_ok
                 and (not rare
@@ -4698,6 +4755,38 @@ def _find_tafsir_opening_clause(
     return None
 
 
+def _find_tafsir_meaning_sentence(
+    query: str, retrieved: list[dict],
+) -> tuple[int, str] | None:
+    """Return a concise tafsir sentence that explains the verse's meaning."""
+    subject_keys = _query_subject_keys(query)
+    for index, chunk in enumerate(retrieved, 1):
+        if chunk.get("source") != "tafsir":
+            continue
+        raw = _strip_source_notes(chunk.get("original_text") or "")
+        for sentence in _split_source_sentences(raw):
+            normalized = normalize(sentence)
+            if not (
+                ("اخبر" in normalized or "معني" in normalized)
+                and ("العسر" in normalized or "اليسر" in normalized)
+            ):
+                continue
+            if subject_keys and not (
+                subject_keys & _source_text_keys(sentence)
+            ):
+                continue
+            clean = re.sub(r"﴿[^﴾]*﴾", "", sentence)
+            clean = re.sub(r"^\s*وَقَوْلُهُ\s*[:：]?\s*", "", clean)
+            clean = _clean_source_snippet(clean)
+            words = clean.split()
+            if len(words) < 5:
+                continue
+            if len(words) > 40:
+                clean = " ".join(words[:40]) + "…"
+            return index, clean
+    return None
+
+
 def _concise_source_clause(
     raw_sentence: str,
     folded_markers: tuple[str, ...],
@@ -4747,6 +4836,82 @@ def _concise_source_clause(
         words -= len(folded_clauses[end].split())
         end -= 1
     return _clean_source_snippet(" ".join(clauses[start:end + 1]))
+
+
+def _requested_distinction_terms(query: str) -> tuple[str, str] | None:
+    """Extract the two terms from "الفرق بين X وY" in a content question."""
+    match = re.search(
+        r"الفرق\s+بين\s+([^\s،.؟]+)\s+و([^\s،.؟]+)",
+        query or "",
+    )
+    if not match:
+        return None
+    left = match.group(1).strip('«»\"\'()[]{}')
+    right = match.group(2).strip('«»\"\'()[]{}')
+    if not left or not right:
+        return None
+    return left, right
+
+
+def _find_distinction_snippet(
+    query: str,
+    answer: str,
+    retrieved: list[dict],
+) -> tuple[int, str] | None:
+    """Find a source passage that explains both terms the user contrasted."""
+    terms = _requested_distinction_terms(query)
+    if not terms:
+        return None
+    left, right = terms
+    left_key = normalize(left)
+    right_key = normalize(right)
+    answer_norm = normalize(answer)
+    if left_key in answer_norm and right_key in answer_norm:
+        return None
+    for index, chunk in enumerate(retrieved, 1):
+        sentences = _split_source_sentences(
+            chunk.get("original_text", "") or "",
+        )
+        for start, sentence in enumerate(sentences):
+            if left_key not in normalize(sentence):
+                continue
+            for end in range(start, min(start + 3, len(sentences))):
+                if right_key not in normalize(sentences[end]):
+                    continue
+                snippet = _clean_source_snippet(
+                    " ".join(sentences[start:end + 1])
+                )
+                if snippet:
+                    return index, snippet
+    return None
+
+
+def _find_source_sentence(
+    query: str,
+    retrieved: list[dict],
+    marker: str,
+) -> tuple[int, str] | None:
+    """Return the full source sentence containing *marker*.
+
+    Unlike ``_find_source_snippet`` this preserves the complete qualification
+    instead of truncating after the first clause, so an answer that asks for
+    detail receives the source's full exception list.
+    """
+    subject_keys = _query_subject_keys(query) - _COMPLETENESS_STOP_KEYS
+    for index, chunk in enumerate(retrieved, 1):
+        raw = chunk.get("original_text", "") or ""
+        if subject_keys and not (
+            subject_keys & _source_text_keys(raw)
+        ):
+            continue
+        for sentence in _split_source_sentences(raw):
+            if marker not in _fold_ar(normalize(sentence)):
+                continue
+            clean = re.sub(r"\s*\(\d+\)", "", sentence)
+            clean = _clean_source_snippet(clean)
+            if clean:
+                return index, clean
+    return None
 
 
 def _find_condition_list_snippet(
@@ -4937,6 +5102,325 @@ def _answer_quotes_verse_fragment(
         " ".join(verse_tokens[i:i + min_tokens]) in answer_norm
         for i in range(len(verse_tokens) - min_tokens + 1)
     )
+
+
+_HADITH_TEXT_REQUEST_MARKERS = (
+    "نص", "نصه", "اذكر", "المصدر", "مصدر", "دلال", "معني", "معنى",
+    "اشرح", "وضح", "شرح",
+)
+
+
+def _is_hadith_text_request(query: str) -> bool:
+    qn = normalize(query)
+    return "حديث" in qn and any(
+        marker in qn for marker in _HADITH_TEXT_REQUEST_MARKERS
+    )
+
+
+def _hadith_quote_from_chunk(chunk: dict) -> str:
+    """Extract the matn quotation from a hadith chunk, without isnad."""
+    metadata = chunk.get("metadata") or {}
+    raw = metadata.get("matn") or chunk.get("original_text") or ""
+    quotes = _QUOTE_RE.findall(raw)
+    if quotes:
+        quote = max(quotes, key=len)
+    else:
+        quote = raw
+        for marker in (
+            "قال رسول الله", "قال النبي", "صلى الله عليه وسلم",
+            "يقول :", "يقول:",
+        ):
+            index = quote.rfind(marker)
+            if index >= 0:
+                tail = quote[index + len(marker):]
+                if len(tail.split()) >= 4:
+                    quote = tail
+                    break
+    return _clean_source_snippet(quote)
+
+
+def _hadith_principle(quote: str) -> str:
+    """Restate the opening principle of a hadith without its narrative.
+
+    This is extractive: it keeps the source's own words up to the first
+    narrative clause (فمن/ومن/ثم) and removes only the emphatic إنما opening.
+    It does not introduce an outside interpretation.
+    """
+    text = _clean_source_snippet(quote)
+    for marker in (" فَمَنْ ", " فمن ", " وَمَنْ ", " ومن ", " ثُمَّ ", " ثم "):
+        if marker in text:
+            text = text.split(marker, 1)[0].strip()
+            break
+    text = re.sub(r"^(?:إِنَّمَا|إنما)\s+", "", text).strip()
+    text = text.replace("وَإِنَّمَا", "وَ").replace("وإنما", "و")
+    text = text.replace("وَ ", "و")
+    text = text.strip(" ،.؛:")
+    words = text.split()
+    if len(words) > 30:
+        text = " ".join(words[:30])
+    return text
+
+
+def _hadith_candidates(
+    query: str, retrieved: list[dict],
+) -> list[tuple[int, dict, str]]:
+    """Retrieved hadiths whose matn matches the quoted phrase in *query*."""
+    query_quotes = _QUOTE_RE.findall(query)
+    wanted = normalize(max(query_quotes, key=len)).strip() if query_quotes else ""
+    candidates: list[tuple[int, dict, str]] = []
+    for index, chunk in enumerate(retrieved, 1):
+        if chunk.get("source") != "hadith":
+            continue
+        quote = _hadith_quote_from_chunk(chunk)
+        if len(quote.split()) < 3:
+            continue
+        source_norm = normalize(
+            (chunk.get("original_text") or "") + " " + quote,
+        )
+        if wanted and wanted not in source_norm:
+            wanted_tokens = set(wanted.split())
+            source_tokens = set(source_norm.split())
+            if not wanted_tokens or (
+                len(wanted_tokens & source_tokens) / len(wanted_tokens) < 0.80
+            ):
+                continue
+        candidates.append((index, chunk, quote))
+    candidates.sort(
+        key=lambda item: (not _is_primary_hadith(item[1]), item[0]),
+    )
+    return candidates
+
+
+def _is_hadith_explanation_request(query: str) -> bool:
+    qn = normalize(query)
+    return "حديث" in qn and any(
+        marker in qn for marker in ("اشرح", "فسر", "وضح", "بيّن", "بين")
+    )
+
+
+def _hadith_explanation_supplement(
+    query: str,
+    answer: str,
+    retrieved: list[dict],
+) -> str | None:
+    """Add an explanation/example when the answer only quotes the hadith.
+
+    The explanation is a restatement of the source's opening principle.  The
+    example is explicitly labelled as illustrative and not part of the hadith
+    text; it is never cited to the source.
+    """
+    if not _is_hadith_explanation_request(query):
+        return None
+    candidates = _hadith_candidates(query, retrieved)
+    if not candidates:
+        return None
+    index, _chunk, quote = candidates[0]
+    principle = _hadith_principle(quote)
+    if len(principle.split()) < 3:
+        return None
+    answer_norm = normalize(answer)
+    lines: list[str] = []
+    has_explanation = any(
+        marker in answer_norm
+        for marker in ("الشرح", "يبيّن", "يبن", "تقوم", "يعني", "أي أن", "اي ان")
+    )
+    if not has_explanation:
+        if "نيات" in normalize(principle) or "نيه" in normalize(principle):
+            lines.append(
+                "الشرح: يبيّن الحديث أن الأعمال تُقوَّم بنياتها، وأن لكل "
+                "امرئ ما نوى؛ فليست العبرة بصورة العمل وحدها، بل بالقصد "
+                f"الذي يحمله صاحبه (مصدر {index})."
+            )
+        else:
+            lines.append(f"الشرح: {principle} (مصدر {index}).")
+    if "مثال" in normalize(query) and "مثال" not in answer_norm:
+        lines.append(
+            "مثال توضيحي (ليس من نص الحديث): نفرض عملين ظاهرهما واحد، "
+            "لكن أحدهما يقصد به صاحبه وجه الله، والآخر يقصد به مدح "
+            "الناس؛ فالصورة متشابهة، والنية مختلفة."
+        )
+    return "\n\n".join(lines) if lines else None
+
+
+def _hadith_text_answer(query: str, retrieved: list[dict]) -> str | None:
+    """Build a source-grounded text/source/meaning answer for a hadith query.
+
+    Used only when generation and grounding still end in a false refusal.
+    The rule is generic: locate the retrieved hadith whose matn contains the
+    quoted phrase from the question (or the first retrieved hadith), quote
+    its matn, name its reference, and restate its opening principle.
+    """
+    if not _is_hadith_text_request(query):
+        return None
+    candidates = _hadith_candidates(query, retrieved)
+    if not candidates:
+        return None
+    index, chunk, quote = candidates[0]
+    reference = str(chunk.get("reference") or "مصدر حديثي")
+    principle = _hadith_principle(quote)
+    lines = [
+        f"نص الحديث: «{quote}» (مصدر {index}).",
+        f"المصدر: {reference} (مصدر {index}).",
+    ]
+    if len(principle.split()) >= 3:
+        lines.append(
+            f"الدلالة الأساسية: {principle} (مصدر {index})."
+        )
+    return "\n\n".join(lines)
+
+
+_SEERAH_EVENT_QUERY_MARKERS = (
+    "احداث", "أحداث", "اهم", "أهم", "رتب", "رتّب", "مراحل", "تسلسل",
+)
+_SEERAH_MAJOR_HEADING_MARKERS = (
+    "هجره", "هجرة", "قريش", "غار", "مدينه", "مدينة", "مسجد",
+    "مهاجر", "خروج", "قدوم", "نزول", "بناء", "تلاحق", "انتظار",
+    "اجتماع",
+)
+_SEERAH_NON_EVENT_HEADING_MARKERS = (
+    "ارتجاز", "شعر", "إخبار", "اخبار", "مشادة", "نسب",
+)
+
+
+def _is_seerah_event_query(query: str) -> bool:
+    qn = normalize(query)
+    return (
+        ("هجره" in qn or "سيره" in qn or "غزوه" in qn)
+        and any(marker in qn for marker in _SEERAH_EVENT_QUERY_MARKERS)
+    )
+
+
+def _seerah_family(reference: str) -> str:
+    return re.sub(r"\s*\(\d+/\d+\)\s*$", "", reference or "").strip()
+
+
+def _seerah_event_outline(
+    query: str, retrieved: list[dict],
+) -> str | None:
+    """Extract an ordered outline from retrieved sira section headings.
+
+    Classical sira chunks carry their own section headings in parentheses.
+    This returns the major headings, in reference order, with the first source
+    sentence of each section.  No event is invented when it is not present in
+    the retrieved chunks.
+    """
+    if not _is_seerah_event_query(query):
+        return None
+    families: dict[str, list[tuple[int, str, dict]]] = {}
+    for index, chunk in enumerate(retrieved, 1):
+        if chunk.get("source") != "sira":
+            continue
+        reference = str(chunk.get("reference") or "")
+        family = _seerah_family(reference)
+        if not family:
+            continue
+        families.setdefault(family, []).append((index, reference, chunk))
+    if not families:
+        return None
+    query_keys = _source_text_keys(query)
+
+    def family_score(item: tuple[str, list]) -> tuple[int, int]:
+        family, members = item
+        family_keys = _source_text_keys(family)
+        return (
+            len(query_keys & family_keys),
+            len(members),
+        )
+
+    family, members = max(families.items(), key=family_score)
+    del family
+    events: list[tuple[int, int, str, str]] = []
+    seen: set[str] = set()
+    for index, reference, chunk in members:
+        ordinal_match = re.search(r"\((\d+)/(\d+)\)", reference)
+        ordinal = int(ordinal_match.group(1)) if ordinal_match else 999
+        raw = chunk.get("original_text") or ""
+        headings = list(re.finditer(r"\(([^)\n]{8,140})\)\s*:", raw))
+        for position, heading_match in enumerate(headings):
+            heading = _clean_source_snippet(heading_match.group(1))
+            if not heading or heading in seen:
+                continue
+            is_first = position == 0
+            heading_norm = normalize(heading)
+            if any(
+                normalize(marker) in heading_norm
+                for marker in _SEERAH_NON_EVENT_HEADING_MARKERS
+            ):
+                continue
+            if not is_first and not any(
+                marker in heading_norm
+                for marker in _SEERAH_MAJOR_HEADING_MARKERS
+            ):
+                continue
+            end = (
+                headings[position + 1].start()
+                if position + 1 < len(headings)
+                else len(raw)
+            )
+            segment = raw[heading_match.end():end]
+            sentences = _split_source_sentences(segment)
+            clause = ""
+            for sentence in sentences:
+                cleaned = _clean_source_snippet(sentence)
+                if len(cleaned.split()) < 5:
+                    continue
+                if cleaned.startswith("قال ابن هشام"):
+                    continue
+                clause = cleaned
+                break
+            if not clause:
+                continue
+            words = clause.split()
+            if len(words) > 55:
+                prefix = " ".join(words[:55])
+                comma = prefix.rfind("،")
+                if comma > 0:
+                    prefix = prefix[:comma]
+                prefix = re.sub(
+                    r"\s+(?:صلى\s+الله\s+عليه|الله\s+عليه)$",
+                    "", prefix,
+                )
+                clause = prefix.strip(" ،") + "…"
+            events.append((ordinal, index, heading, clause))
+            seen.add(heading)
+    if len(events) < 3:
+        return None
+    events.sort(key=lambda item: (item[0], item[1]))
+    chosen = events[:6]
+    lines = []
+    for number, (_, index, heading, clause) in enumerate(chosen, 1):
+        heading = heading.strip(" :،.؛")
+        lines.append(
+            f"{number}. {heading}: {clause} (مصدر {index})."
+        )
+    covered = normalize(
+        " ".join(heading + " " + clause for _, _, heading, clause in chosen)
+    )
+    missing: list[str] = []
+    for marker, label in (
+        ("غار", "المكوث في الغار"),
+        ("قباء", "القدوم إلى قباء"),
+        ("الطريق", "تفاصيل الطريق"),
+        ("خرج النبي", "تفاصيل الخروج من مكة"),
+        ("وصل النبي", "تفاصيل الوصول إلى المدينة"),
+    ):
+        if normalize(marker) not in covered:
+            missing.append(label)
+    if missing:
+        lines.append("")
+        lines.append(
+            "المراحل الواردة أعلاه هي ما تدعمه المصادر المستردة. "
+            "لم تُسترد تفاصيل كافية عن: "
+            + "، ".join(missing)
+            + "؛ لذلك لا تُذكر هنا ولا تُنسب إلى المصادر."
+        )
+    else:
+        lines.append("")
+        lines.append(
+            "ما ورد أعلاه هو ما تدعمه المصادر المستردة، ولم تُضف "
+            "تفاصيل غير ثابتة فيها."
+        )
+    return "\n".join(lines)
 
 
 def _augment_answer_completeness(
@@ -5204,7 +5688,11 @@ def _augment_answer_completeness(
                     phrase_only=True,
                 )
                 if qualified:
-                    additions.append(("append", *qualified))
+                    qualified_chunk = retrieved[qualified[0] - 1]
+                    if day_tokens[0] in normalize(
+                        qualified_chunk.get("original_text", "") or "",
+                    ):
+                        additions.append(("append", *qualified))
                 day = day_tokens[0]
                 found = _find_source_snippet(
                     query, answer, retrieved,
@@ -5218,8 +5706,18 @@ def _augment_answer_completeness(
                     ),
                     phrase_only=True,
                 )
-                if found:
+                if found and len(found[1].split()) >= 8:
                     additions.append(("append", *found))
+            if "عاده" not in answer_norm:
+                full_qualification = _find_source_sentence(
+                    query, retrieved, "وذهب الجمهور",
+                )
+                if full_qualification:
+                    additions.append(("append", *full_qualification))
+    distinction = _find_distinction_snippet(query, answer, retrieved)
+    if distinction:
+        additions.append(("append", *distinction))
+
     if "شروط" in qn:
         # A conditions question needs the source's own condition list, not
         # only the subset the model happened to mention.
@@ -5542,6 +6040,11 @@ _FOLLOWUP_DEMONSTRATIVE_TOKENS = {
 _FOLLOWUP_ATTACHED_TOKENS = {
     "حكمه", "حكمها", "حكمهم", "دليله", "دليلها",
     "معناه", "معناها", "رأيه", "رأيها", "مثله", "مثلها",
+    "اصومه", "أصومه", "اصومها", "أصومها",
+    "صومه", "صيامه", "صومها", "صيامها",
+    "لوحده", "لوحدها", "لوحدي",
+    "انواعه", "أنواعه", "انواعها", "أنواعها",
+    "شروطه", "شروطها", "احكامه", "أحكامه",
 }
 
 # Legal/practical words in a follow-up ("يعني لازم أصوم...؟", "هل ده واجب؟")
@@ -5557,6 +6060,9 @@ _FOLLOWUP_LEGAL_WORDS = {
 _FOLLOWUP_PRACTICAL_WORDS = {
     "اصوم", "صوم", "صيام", "افطر", "فطر", "يوم", "قبله", "بعده",
     "قبل", "بعد", "الحاله", "حاله", "ده", "دي", "دول",
+    "مينفعش", "ماينفعش", "ينفع", "مش", "لوحده", "لوحدها", "لوحدي",
+    "اصومه", "أصومه", "اصومها", "أصومها",
+    "صومه", "صيامه", "صومها", "صيامها",
 }
 
 # Words that carry a conversational intent but not a topic.  A query made
@@ -5767,6 +6273,111 @@ def _evidence_target_text(previous_assistant: str) -> str:
     if preferred:
         return preferred[-1][:500]
     return sentences[-1][:500] if sentences else ""
+
+
+def _followup_required_evidence_keys(query: str) -> set[str]:
+    """Action/day keys that a strict follow-up retrieval must cover.
+
+    Only day-qualified action questions (e.g. Friday fasting) use the strict
+    all-keys check.  Other follow-ups keep the established retrieval behavior
+    so a narrow clarification such as "وما شروطه؟" is not converted into a
+    refusal.
+    """
+    return _required_action_evidence_keys(query)
+
+
+def _followup_results_relevant(
+    retrieval_query: str,
+    retrieved: list[dict],
+    required_keys: set[str],
+) -> bool:
+    if not retrieved:
+        return False
+    if not required_keys:
+        return True
+    for chunk in retrieved:
+        if required_keys <= _legal_topic_keys(
+            chunk.get("original_text", "") or "",
+        ):
+            return True
+    return False
+
+
+def _filter_followup_results(
+    retrieved: list[dict],
+    required_keys: set[str],
+) -> list[dict]:
+    """Drop unrelated chunks from a follow-up retrieval.
+
+    A follow-up about Friday fasting must not display waqf, usurpation, or
+    other unrelated sources merely because they passed the generic retrieval
+    gate.  Chunks covering all required keys are preferred; chunks covering
+    at least one are retained as secondary evidence.
+    """
+    if not required_keys:
+        return retrieved
+    full = [
+        chunk for chunk in retrieved
+        if required_keys <= _legal_topic_keys(
+            chunk.get("original_text", "") or "",
+        )
+    ]
+    if full:
+        return full
+    partial = [
+        chunk for chunk in retrieved
+        if required_keys & _legal_topic_keys(
+            chunk.get("original_text", "") or "",
+        )
+    ]
+    return partial or retrieved
+
+
+def _followup_retry_query(
+    query: str,
+    chat_history: list[dict] | None,
+) -> str:
+    """Build a stronger retrieval query from the prior turn's context."""
+    previous_user = _last_substantive_user(chat_history)
+    previous_assistant = next(
+        (
+            str(message.get("content") or "").strip()
+            for message in reversed(chat_history or [])
+            if isinstance(message, dict)
+            and message.get("role") == "assistant"
+            and str(message.get("content") or "").strip()
+        ),
+        "",
+    )
+    target = _evidence_target_text(previous_assistant)
+    parts = [previous_user, target, query]
+    return " ".join(part for part in parts if part).strip()
+
+
+_AMBIGUOUS_ACTION_CLARIFICATION = (
+    "ما الفعل أو التصرف المقصود بـ«كده»؟ وضّح لي ما فعلته أو تنوي فعله "
+    "(مثل: صيام يوم الجمعة، أو فعل معين في الصلاة، أو تصرف مالي) حتى "
+    "أبحث عن حكمه في المصادر."
+)
+
+
+def _is_ambiguous_action_followup(
+    query: str,
+    chat_history: list[dict] | None,
+) -> bool:
+    """True for a deictic "I did that" follow-up with no identified action."""
+    if not chat_history:
+        return False
+    qn = normalize(query)
+    deictic = any(
+        marker in qn for marker in ("كده", "كدا", "كذالك", "كذلك", "هكذا")
+    )
+    generic_action = any(
+        marker in qn for marker in (
+            "عملت", "اعمل", "فعلت", "افعل", "سويت", "اسوي", "عمل",
+        )
+    )
+    return deictic and generic_action
 
 
 def _history_aware_query(
@@ -6275,6 +6886,38 @@ def _legal_followup_lead(
     return "المصادر المسترجعة لا تجزم بالإباحة. "
 
 
+_RELIGIOUS_REFUSAL = "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال."
+
+
+def _merge_website_help(
+    answer: str,
+    query: str,
+    chat_history: list[dict] | None,
+    sources: list,
+) -> tuple[str, list]:
+    """Attach the website-help part of a mixed question to a RAG answer.
+
+    Pure website questions return before retrieval.  A mixed question keeps
+    its religious answer, then receives the product-help answer from the
+    website source of truth.  If the religious part has no evidence, the
+    user still gets the website help plus an honest note about the religious
+    part instead of a bare refusal.
+    """
+    site_answer = build_website_answer(query, chat_history)
+    site_sources = website_help_sources()
+    if answer.strip() == _RELIGIOUS_REFUSAL:
+        combined = (
+            site_answer
+            + "\n\nأما الجزء الشرعي من سؤالك، فلم أجد في المصادر المتاحة "
+            "ما يجيب عنه."
+        )
+        return combined, site_sources
+    return (
+        answer.rstrip() + "\n\n" + site_answer,
+        list(sources) + site_sources,
+    )
+
+
 def generate(
     query: str,
     index,
@@ -6288,6 +6931,28 @@ def generate(
     Returns:
         Dict with keys: answer (str), sources (list), query (str).
     """
+    # Website questions are answered from the implemented product surface,
+    # not from the Islamic corpus.  This routing happens before Tafsir
+    # resolution so questions such as "إزاي أبحث عن تفسير آية؟" are not
+    # mistaken for a request to resolve a verse.
+    website_intent = classify_website_intent(query, chat_history)
+    if website_intent["is_website"] and not website_intent["is_mixed"]:
+        return {
+            "answer": build_website_answer(query, chat_history),
+            "sources": website_help_sources(),
+            "query": query,
+            "mode": "website_help",
+        }
+
+    if _is_ambiguous_action_followup(query, chat_history):
+        # "ما حكمه لو عملت كده؟" has no identifiable action.  Do not let
+        # retrieval guess a topic from the previous answer.
+        return {
+            "answer": _AMBIGUOUS_ACTION_CLARIFICATION,
+            "sources": [],
+            "query": query,
+        }
+
     # A tafsir request that cannot be resolved to one ayah gets an explicit
     # clarification before any generation (e.g. whole-surah request).  A
     # resolved request passes its deterministic anchors into retrieval.
@@ -6298,6 +6963,16 @@ def generate(
         retrieval_query, index, chunks, client,
     )
     if tafsir_clarification:
+        if website_intent["is_website"] and website_intent["is_mixed"]:
+            answer, sources = _merge_website_help(
+                tafsir_clarification, query, chat_history, [],
+            )
+            return {
+                "answer": answer,
+                "sources": sources,
+                "query": query,
+                "mode": "mixed",
+            }
         return {
             "answer": tafsir_clarification,
             "sources": [],
@@ -6310,14 +6985,84 @@ def generate(
         retrieval_query=retrieval_query,
     )
 
+    # A hadith text/explanation question is answered from the hadith corpus;
+    # unrelated tafsir/fiqh chunks in the generic retrieval pool can otherwise
+    # be cited as if they explained the narration.
+    if (
+        _is_hadith_text_request(query)
+        or _is_hadith_explanation_request(query)
+    ):
+        hadith_only = [
+            chunk for chunk in retrieved
+            if chunk.get("source") == "hadith"
+        ]
+        if hadith_only:
+            retrieved = hadith_only
+
+    # A resolved Tafsir request has two precise anchors: the verse and its
+    # commentary.  Other high-scoring tafsir chunks can be unrelated to the
+    # asked ayah; do not let the generator cite them in a meaning answer.
+    if tafsir_anchors and not any(
+        marker in normalize(query)
+        for marker in ("حكم", "يجوز", "حرام", "حلال", "فتوى")
+    ):
+        anchor_ids = {
+            str(chunk.get("id"))
+            for chunk in tafsir_anchors
+            if chunk.get("id")
+        }
+        focused = [
+            chunk for chunk in retrieved
+            if str(chunk.get("id")) in anchor_ids
+        ]
+        if focused:
+            retrieved = focused
+
+    # Follow-up turns must not display unrelated evidence merely because the
+    # generic gate passed.  Retry once with the previous question and answer
+    # context; if that still fails, return an honest refusal with no sources.
+    followup_turn = bool(chat_history and _is_followup_query(query))
+    if followup_turn:
+        required_keys = _followup_required_evidence_keys(retrieval_query)
+        if not _followup_results_relevant(
+            retrieval_query, retrieved, required_keys,
+        ):
+            retry_query = _followup_retry_query(query, chat_history)
+            retried = retrieve(
+                query, index, chunks, client, top_k=top_k,
+                tafsir_anchors=tafsir_anchors,
+                retrieval_query=retry_query,
+            )
+            if _followup_results_relevant(
+                retry_query, retried, required_keys,
+            ):
+                retrieved = retried
+            else:
+                return {
+                    "answer": _RELIGIOUS_REFUSAL,
+                    "sources": [],
+                    "query": query,
+                }
+        retrieved = _filter_followup_results(retrieved, required_keys)
+
     # Gate: retrieve() marks every chunk with _gate_passed.  Refuse before
     # calling GPT when the retrieval gate failed — no synthetic scores are
     # involved in this decision.
     if not retrieved or not retrieved[0].get("_gate_passed", False):
         sources = [f"{c.get('source','غير محدد')} — {c.get('reference','غير محدد')}"
                    for c in retrieved]
+        if website_intent["is_website"] and website_intent["is_mixed"]:
+            answer, sources = _merge_website_help(
+                _RELIGIOUS_REFUSAL, query, chat_history, sources,
+            )
+            return {
+                "answer": answer,
+                "sources": sources,
+                "query": query,
+                "mode": "mixed",
+            }
         return {
-            "answer": "لم أجد في المصادر المتاحة ما يجيب عن هذا السؤال.",
+            "answer": _RELIGIOUS_REFUSAL,
             "sources": sources,
             "query": query,
         }
@@ -6532,8 +7277,46 @@ def generate(
             else:
                 answer = prefix + answer
 
+    if answer.strip() == _RELIGIOUS_REFUSAL:
+        hadith_answer = _hadith_text_answer(query, retrieved)
+        if hadith_answer:
+            answer = hadith_answer
+
+    hadith_supplement = _hadith_explanation_supplement(
+        query, answer, retrieved,
+    )
+    if hadith_supplement:
+        answer = answer.rstrip() + "\n\n" + hadith_supplement
+
+    if _is_seerah_event_query(query):
+        seerah_outline = _seerah_event_outline(query, retrieved)
+        if seerah_outline:
+            answer = seerah_outline
+
+    if tafsir_anchors and not any(
+        marker in normalize(answer)
+        for marker in ("اخبر", "معني الايه", "يدل علي", "يفيد")
+    ):
+        meaning = _find_tafsir_meaning_sentence(query, retrieved)
+        if meaning:
+            answer = (
+                answer.rstrip()
+                + f"\n\n{meaning[1]} (مصدر {meaning[0]})."
+            )
+
     sources = [f"{c.get('source','غير محدد')} — {c.get('reference','غير محدد')}"
                for c in retrieved]
+
+    if website_intent["is_website"] and website_intent["is_mixed"]:
+        answer, sources = _merge_website_help(
+            answer, query, chat_history, sources,
+        )
+        return {
+            "answer": answer,
+            "sources": sources,
+            "query": query,
+            "mode": "mixed",
+        }
 
     return {"answer": answer, "sources": sources, "query": query}
 

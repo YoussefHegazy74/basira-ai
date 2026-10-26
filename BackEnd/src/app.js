@@ -66,7 +66,10 @@ const allowedOrigins = new Set(
 
 app.use(cookieParser());
 app.use(helmet());
-app.use(limiter);
+// CORS must run before the rate limiter.  Otherwise a 429 response
+// short-circuits before CORS headers are attached, the browser treats it as
+// a network failure, and the login page cannot show the real rate-limit
+// reason.
 app.use(
   cors({
     // Reflecting an arbitrary Origin with credentials enabled would let any
@@ -81,6 +84,7 @@ app.use(
     credentials: true,
   }),
 );
+app.use(limiter);
 app.use(morgan("dev"));
 app.use(express.json());
 

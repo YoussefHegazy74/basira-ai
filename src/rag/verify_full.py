@@ -2,10 +2,26 @@
 Basira RAG — Unified Verification
 =====================================
 Verifies the authenticity and completeness of Arabic religious texts,
-and optionally evaluates an accompanying explanation — all in a single
-GPT-4o-mini call backed by FAISS semantic search.
+and optionally evaluates an accompanying explanation.
 
-Replaces: verify.py, detect_truncation.py
+The verification service is independent of the chatbot.  Quran quotations
+are resolved lexically against the canonical Quran corpus *before* any
+semantic retrieval or model call.  Semantic similarity is never treated as
+proof that a quotation exists verbatim.  Hadith and other source types keep
+the established retrieval + model validation path.
+
+Result schema
+-------------
+The legacy 11 keys are preserved for existing consumers.  New fields make the
+distinction between quotation existence, completeness, interpretation
+assessment, evidence sufficiency, and service failure explicit:
+
+    verification_status: verified | partial | contradicted | inconclusive |
+                         error
+    quotation:           found / match_type / is_complete / canonical_text /
+                         reference / source / surah / ayah
+    interpretation:      provided / status / label / assessment / correction
+    evidence:            source-backed passages used for the result
 """
 
 from __future__ import annotations
@@ -28,6 +44,7 @@ from src.embeddings.embedder import get_client, embed_text
 from src.vector_db.faiss_store import search
 from src.nlp.preprocessor import preprocess, normalize
 from src.rag.pipeline import ground_text
+from src.rag.tafsir import match_quran_quotation
 
 # Default paths for the FAISS index and chunks
 INDEX_PATH = Path("data/processed/faiss.index")
@@ -36,6 +53,10 @@ CHUNKS_PATH = Path("data/processed/chunks.pkl")
 # Deterministic truncation-check thresholds
 INPUT_MATCH_MIN = 0.8
 MATN_COVERAGE_MAX = 0.7
+
+NOT_PROVIDED_LABEL = "لم يتم تقديم تفسير لتقييمه"
+VERIFICATION_ERROR_LABEL = "تعذّر إكمال التحقق"
+INCONCLUSIVE_LABEL = "لا توجد أدلة كافية"
 
 # ---------------------------------------------------------------------------
 # Matn cleaning helpers (Task A)
@@ -114,6 +135,7 @@ def _clean_matn_words(matn_raw: str, strip_framing: bool = True) -> list[str]:
 
     return words
 
+
 SYSTEM_PROMPT = (
     "أنت عالم إسلامي متخصص في التحقق من النصوص الدينية.\n"
     " ستُعطى نصاً دينياً وربما شرحاً له، بالإضافة إلى مصادر من قاعدة البيانات.\n\n"
@@ -144,6 +166,25 @@ SYSTEM_PROMPT = (
     "   'explanation_verdict': 'سبب الحكم أو فارغ',\n"
     "   'correct_explanation': 'الشرح الصحيح من المصادر أو فارغ'\n"
     " }"
+)
+
+INTERPRETATION_SYSTEM_PROMPT = (
+    "أنت تقيّم تفسيراً قدمه المستخدم لنص قرآني موثق.\n"
+    "لديك النص القرآني الكامل، وتفسير ابن كثير عند توفره في المصادر.\n"
+    "قيّم التفسير المقدم فقط، ولا تصدر حكماً على صحة النص القرآني نفسه.\n\n"
+    "قواعد صارمة:\n"
+    "- لا تعتمد على معرفتك الخاصة، ولا تخترع آية أو حديثاً أو مرجعاً.\n"
+    "- إذا كان التفسير يوافق المعنى الذي تدعمه المصادر فقل: موافق.\n"
+    "- إذا كان يخالف المعنى أو يحمّله ما لا يحتمله فقل: مخالف، واذكر موضع الخطأ.\n"
+    "- إذا كان بعضه صحيحاً وبعضه غير مدعوم فقل: جزئياً موافق.\n"
+    "- إذا لم تكف المصادر للحكم فقل: غير مؤكد. لا تجعل عدم كفاية الدليل حكماً بالخطأ.\n"
+    "- الشرح الصحيح يجب أن يكون مستنداً إلى النص أو التفسير المقدمين فقط.\n\n"
+    "أعد JSON فقط بهذه المفاتيح:\n"
+    "{\n"
+    "  'explanation_status': 'موافق أو مخالف أو جزئياً موافق أو غير مؤكد',\n"
+    "  'explanation_verdict': 'سبب الحكم في جملة أو جملتين',\n"
+    "  'correct_explanation': 'تصحيح مستند إلى المصادر أو فارغ'\n"
+    "}"
 )
 
 
@@ -191,11 +232,16 @@ def _is_yes(val) -> bool:
 # RAG-02 post-generation validation helpers
 # ---------------------------------------------------------------------------
 
-# Enum taxonomies exactly as requested by SYSTEM_PROMPT above; invalid model
-# output falls back to the pre-existing safe defaults.
-_TEXT_STATUS_VALUES = {"صحيح", "ضعيف", "موضوع", "غير موجود"}
-_DANGER_LEVEL_VALUES = {"منخفضة", "متوسطة", "عالية"}
-_EXPLANATION_STATUS_VALUES = {"موافق", "مخالف", "جزئياً موافق", "لا يوجد"}
+# Enum taxonomies.  "غير مؤكد" and "خطأ في التحقق" are deliberately distinct
+# from "غير موجود": absence of retrieved evidence is not evidence of absence,
+# and a service failure is not a verdict about the text.
+_TEXT_STATUS_VALUES = {
+    "صحيح", "ضعيف", "موضوع", "غير موجود", "غير مؤكد", "خطأ في التحقق",
+}
+_DANGER_LEVEL_VALUES = {"منخفضة", "متوسطة", "عالية", "غير محسوبة"}
+_EXPLANATION_STATUS_VALUES = {
+    "موافق", "مخالف", "جزئياً موافق", "لا يوجد", "غير مؤكد", "تعذّر التقييم",
+}
 
 # Arabic-Indic digits -> ASCII, so ١٢٣ and 123 compare equal.
 _ARABIC_DIGIT_TABLE = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
@@ -327,52 +373,522 @@ def _dual_search(text: str, client, index, chunks, top_k: int, debug: bool = Fal
 
 
 # ---------------------------------------------------------------------------
-# Main verification function
+# Structured result builders
 # ---------------------------------------------------------------------------
 
-def verify_full(
+_DANGER_MEANING = (
+    "درجة الخطورة تقدير لاحتمال أن يؤدي الاقتباس أو تفسيره إلى فهم مضلل، "
+    "وليست درجة ثقة في صحة النتيجة."
+)
+
+
+def _empty_interpretation(provided: bool = False) -> dict:
+    return {
+        "provided": provided,
+        "status": "not_provided" if not provided else "inconclusive",
+        "label": NOT_PROVIDED_LABEL if not provided else "لم يكتمل تقييم التفسير",
+        "assessment": "",
+        "correction": "",
+        "error": "",
+    }
+
+
+def _base_result(
     text: str,
-    explanation: str | None = None,
-    index: faiss.IndexFlatIP | None = None,
-    chunks: list[dict] | None = None,
-    client=None,
-    top_k: int = 5,
+    explanation: str,
+    *,
+    verification_status: str,
+    status_label: str,
+    status_explanation: str,
+    text_status: str,
+    is_truncated: bool,
+    missing_part: str,
+    full_text: str,
+    source: str,
+    danger_level: str,
+    explanation_status: str,
+    explanation_verdict: str,
+    correct_explanation: str,
+    quotation: dict,
+    interpretation: dict,
+    evidence: list[dict],
+    evidence_status: str = "",
+    evidence_note: str = "",
+    retrieval_ok: bool = True,
+    verification_error: str = "",
+) -> dict:
+    danger_applicable = danger_level != "غير محسوبة"
+    if not evidence_status:
+        evidence_status = "relevant" if evidence else "none"
+    return {
+        # --- legacy contract (kept for existing consumers) ---
+        "text_status": text_status,
+        "is_truncated": bool(is_truncated),
+        "missing_part": missing_part or "",
+        "full_text": full_text or "",
+        "source": source or "",
+        "danger_level": danger_level,
+        "explanation_status": explanation_status,
+        "explanation_verdict": explanation_verdict or "",
+        "correct_explanation": correct_explanation or "",
+        "input_text": text,
+        "input_explanation": explanation or "",
+        # --- structured result ---
+        "verification_status": verification_status,
+        "status_label": status_label,
+        "status_explanation": status_explanation,
+        "quotation": quotation,
+        "interpretation": interpretation,
+        "evidence": evidence,
+        "evidence_status": evidence_status,
+        "evidence_note": evidence_note or "",
+        "danger_level_meaning": _DANGER_MEANING,
+        "danger_level_applicable": danger_applicable,
+        "retrieval_ok": retrieval_ok,
+        "verification_error": verification_error,
+        "overall_status": (
+            "error" if verification_status == "error" else verification_status
+        ),
+        "components": [],
+        "component_count": 0,
+    }
+
+
+def _empty_quotation() -> dict:
+    return {
+        "found": False,
+        "ambiguous": False,
+        "match_type": "none",
+        "is_partial": False,
+        "is_complete": False,
+        "coverage": 0.0,
+        "matched_tokens": 0,
+        "query_tokens": 0,
+        "canonical_text": "",
+        "reference": "",
+        "source": "",
+        "surah_name": "",
+        "surah_number": None,
+        "ayah_number": None,
+        "candidates": [],
+    }
+
+
+def _inconclusive_result(
+    text: str,
+    explanation: str,
+    *,
+    reason: str,
+    retrieval_ok: bool = True,
+) -> dict:
+    interpretation = _empty_interpretation(bool(explanation))
+    if explanation:
+        interpretation["label"] = "لم يتم تقييم التفسير لعدم كفاية دليل النص"
+    return _base_result(
+        text,
+        explanation,
+        verification_status="inconclusive",
+        status_label=INCONCLUSIVE_LABEL,
+        status_explanation=reason,
+        text_status="غير مؤكد",
+        is_truncated=False,
+        missing_part="",
+        full_text="",
+        source="",
+        danger_level="غير محسوبة",
+        explanation_status=(
+            "غير مؤكد" if explanation else NOT_PROVIDED_LABEL
+        ),
+        explanation_verdict="",
+        correct_explanation="",
+        quotation=_empty_quotation(),
+        interpretation=interpretation,
+        evidence=[],
+        retrieval_ok=retrieval_ok,
+    )
+
+
+def _error_result(
+    text: str,
+    explanation: str,
+    *,
+    message: str,
+    retrieval_ok: bool = False,
+) -> dict:
+    interpretation = _empty_interpretation(bool(explanation))
+    interpretation.update({
+        "status": "error",
+        "label": "تعذّر تقييم التفسير",
+        "error": message,
+    })
+    return _base_result(
+        text,
+        explanation,
+        verification_status="error",
+        status_label=VERIFICATION_ERROR_LABEL,
+        status_explanation=(
+            "حدث خطأ أثناء البحث في المصادر أو أثناء تقييم النتيجة. "
+            "هذا ليس حكماً بأن النص غير موجود."
+        ),
+        text_status="خطأ في التحقق",
+        is_truncated=False,
+        missing_part="",
+        full_text="",
+        source="",
+        danger_level="غير محسوبة",
+        explanation_status="تعذّر التقييم",
+        explanation_verdict="",
+        correct_explanation="",
+        quotation=_empty_quotation(),
+        interpretation=interpretation,
+        evidence=[],
+        retrieval_ok=retrieval_ok,
+        verification_error=message,
+    )
+
+
+def _find_tafsir_chunk(chunks: list[dict], surah: int | None, ayah: int | None) -> dict | None:
+    if surah is None or ayah is None:
+        return None
+    wanted = f"تفسير ابن كثير {surah}:{ayah}"
+    for chunk in chunks:
+        if chunk.get("source") != "tafsir":
+            continue
+        if chunk.get("reference") == wanted:
+            return chunk
+    for chunk in chunks:
+        if chunk.get("source") != "tafsir":
+            continue
+        metadata = chunk.get("metadata") or {}
+        if (
+            metadata.get("surah_number") == surah
+            and metadata.get("ayah_number") == ayah
+        ):
+            return chunk
+    return None
+
+
+def _evidence_excerpt(text: str, limit: int = 900) -> str:
+    clean = " ".join((text or "").split())
+    if len(clean) <= limit:
+        return clean
+    return clean[:limit].rstrip() + "…"
+
+
+def _assess_interpretation(
+    explanation: str,
+    quran_chunk: dict,
+    tafsir_chunk: dict | None,
+    chunks: list[dict],
+    client,
+    *,
     debug: bool = False,
 ) -> dict:
-    """Verify text authenticity + truncation + optional explanation in one call.
+    """Evaluate the user's interpretation against the canonical verse/tafsir.
 
-    Pipeline:
-        1. Dual-embedding search on *text*.
-        2. If *explanation* is provided, dual-embedding search on *explanation*
-           and merge results (deduplicate by chunk id).
-        3. Call GPT-4o-mini with the unified system prompt.
-        4. Parse the JSON response with Arabic fallbacks.
-        5. Return a dict with all 9 result keys plus input_text and
-           input_explanation.
-
-    Args:
-        text:        The Arabic text to verify.
-        explanation: Optional explanation/interpretation to evaluate.
-        index:       A loaded FAISS index (loaded automatically if None).
-        chunks:      The chunk dicts aligned with the index.
-        client:      An authenticated OpenAI client (created if None).
-        top_k:       Number of FAISS results to retrieve per search.
-        debug:       If True, print intermediate results.
-
-    Returns:
-        Dict with keys: text_status, is_truncated, missing_part, full_text,
-        source, danger_level, explanation_status, explanation_verdict,
-        correct_explanation, input_text, input_explanation.
+    This function never decides whether the verse exists; that decision was
+    already made lexically.  It only returns a supported/contradicted/
+    inconclusive assessment for the interpretation.
     """
-    # --- Auto-load resources if not provided ---
-    if client is None:
-        client = get_client()
-    if index is None or chunks is None:
-        index, chunks = load_faiss_index()
+    if not explanation:
+        return _empty_interpretation(False)
 
-    # --- Step 1: Wide dual-embedding search on text ---
-    wide_k = top_k * 20
-    wide_results = _dual_search(text, client, index, chunks, wide_k, debug=debug)
+    if client is None:
+        result = _empty_interpretation(True)
+        result.update({
+            "status": "error",
+            "label": "تعذّر تقييم التفسير",
+            "error": "خدمة التقييم غير متاحة.",
+        })
+        return result
+
+    evidence = [quran_chunk]
+    if tafsir_chunk is not None:
+        evidence.append(tafsir_chunk)
+
+    context_parts = []
+    for index, chunk in enumerate(evidence, 1):
+        context_parts.append(
+            f"[مصدر {index}] ({chunk.get('source', '')} — "
+            f"{chunk.get('reference', '')}):\n"
+            f"{chunk.get('original_text', '')}"
+        )
+
+    user_message = (
+        f"النص القرآني والتفسير المتاح:\n\n"
+        + "\n\n".join(context_parts)
+        + f"\n\nالتفسير المقدم من المستخدم:\n{explanation}\n\n"
+        "قيّم التفسير المقدم فقط."
+    )
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": INTERPRETATION_SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        raw = response.choices[0].message.content
+        if debug:
+            print(f"\n[DEBUG] Raw interpretation response:\n{raw}")
+        try:
+            answer = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            answer = {}
+    except Exception as error:  # network/model failure is an error state
+        if debug:
+            print(f"[DEBUG] Interpretation assessment failed: {error}")
+        result = _empty_interpretation(True)
+        result.update({
+            "status": "error",
+            "label": "تعذّر تقييم التفسير",
+            "error": "تعذّر الاتصال بخدمة تقييم التفسير.",
+        })
+        return result
+
+    status = _validated_enum(
+        get_key(
+            answer,
+            "explanation_status", "تقييم الشرح", "تقييم_الشرح",
+            "حكم_الشرح", "status",
+            default="غير مؤكد",
+        ),
+        {"موافق", "مخالف", "جزئياً موافق", "غير مؤكد"},
+        "غير مؤكد",
+    )
+    verdict = str(get_key(
+        answer,
+        "explanation_verdict", "سبب الحكم", "سبب_الحكم", "السبب",
+    ) or "").strip()
+    correction = str(get_key(
+        answer,
+        "correct_explanation", "الشرح الصحيح", "الشرح_الصحيح",
+        "الشرح الصحيح من المصادر",
+    ) or "").strip()
+
+    if correction:
+        try:
+            correction = ground_text(
+                correction, evidence, chunks, refusal="",
+            )
+        except Exception:
+            correction = ""
+
+    status_map = {
+        "موافق": ("supported", "التفسير مدعوم بالمصادر"),
+        "مخالف": ("contradicted", "التفسير غير مدعوم أو يخالف المصادر"),
+        "جزئياً موافق": (
+            "partially_supported", "التفسير مدعوم جزئياً",
+        ),
+        "غير مؤكد": ("inconclusive", "المصادر لا تكفي للحكم على التفسير"),
+    }
+    key, label = status_map[status]
+
+    return {
+        "provided": True,
+        "status": key,
+        "label": label,
+        "assessment": verdict,
+        "correction": correction,
+        "error": "",
+        "source_status": status,
+    }
+
+
+def _interpretation_danger(interpretation: dict, is_partial: bool) -> str:
+    if interpretation.get("status") == "contradicted":
+        return "عالية"
+    if interpretation.get("status") == "partially_supported":
+        return "متوسطة"
+    if interpretation.get("status") in {"supported", "not_provided"}:
+        return "متوسطة" if is_partial else "منخفضة"
+    return "غير محسوبة"
+
+
+def _quran_result(
+    text: str,
+    explanation: str,
+    match: dict,
+    chunks: list[dict],
+    client,
+    *,
+    debug: bool = False,
+) -> dict:
+    chunk = match.get("chunk") or {}
+    canonical = match.get("canonical_text", "") or ""
+    reference = match.get("reference", "") or ""
+    surah = match.get("surah_name", "") or ""
+    surah_number = match.get("surah_number")
+    ayah_number = match.get("ayah_number")
+    complete = bool(match.get("is_complete"))
+    match_type = match.get("match_type", "none")
+    is_partial = not complete
+
+    tafsir_chunk = _find_tafsir_chunk(chunks, surah_number, ayah_number)
+    evidence = [{
+        "source": "quran",
+        "reference": reference,
+        "text": canonical,
+        "role": "canonical",
+    }]
+    if tafsir_chunk is not None:
+        evidence.append({
+            "source": "tafsir",
+            "reference": tafsir_chunk.get("reference", ""),
+            "text": _evidence_excerpt(tafsir_chunk.get("original_text", "")),
+            "role": "interpretation",
+        })
+
+    interpretation = _assess_interpretation(
+        explanation, chunk, tafsir_chunk, chunks, client, debug=debug,
+    )
+
+    if match_type == "approximate":
+        status_label = "تم العثور على اقتباس تقريبي"
+        status_explanation = (
+            f"النص قريب من {surah} {ayah_number} ({reference}) لكنه ليس "
+            "مطابقاً حرفياً للآية كما وردت في المصحف. راجع النص الكامل قبل "
+            "الاعتماد على الاقتباس."
+        )
+        verification_status = "partial"
+    elif is_partial:
+        status_label = "تم التحقق — اقتباس جزئي"
+        status_explanation = (
+            f"النص جزء حرفي من الآية {ayah_number} من سورة {surah} "
+            f"({reference}). الاقتباس صحيح ولكنه غير مكتمل؛ النص الكامل "
+            "معروض أدناه."
+        )
+        verification_status = "partial"
+    else:
+        status_label = "تم التحقق — اقتباس مطابق"
+        status_explanation = (
+            f"النص مطابق للآية {ayah_number} من سورة {surah} ({reference}) "
+            "بحسب النص القرآني المحفوظ في قاعدة البيانات."
+        )
+        verification_status = "verified"
+
+    if interpretation.get("status") == "contradicted":
+        status_label += " — التفسير غير مدعوم"
+        status_explanation += (
+            " التفسير المقدم لا يوافق ما تدعمه المصادر، وقد تم توضيح "
+            "موضع المشكلة أدناه."
+        )
+    elif interpretation.get("status") == "partially_supported":
+        status_label += " — التفسير مدعوم جزئياً"
+    elif interpretation.get("status") == "error":
+        status_label += " — تعذّر تقييم التفسير"
+
+    explanation_status = {
+        "supported": "موافق",
+        "contradicted": "مخالف",
+        "partially_supported": "جزئياً موافق",
+        "inconclusive": "غير مؤكد",
+        "error": "تعذّر التقييم",
+        "not_provided": NOT_PROVIDED_LABEL,
+    }.get(interpretation.get("status"), "غير مؤكد")
+
+    danger = _interpretation_danger(interpretation, is_partial)
+
+    quotation = {
+        "found": True,
+        "ambiguous": False,
+        "match_type": match_type,
+        "is_partial": is_partial,
+        "is_complete": complete,
+        "coverage": match.get("coverage", 1.0),
+        "matched_tokens": match.get("matched_tokens", 0),
+        "query_tokens": match.get("query_tokens", 0),
+        "canonical_text": canonical,
+        "reference": reference,
+        "source": "quran",
+        "surah_name": surah,
+        "surah_number": surah_number,
+        "ayah_number": ayah_number,
+        "candidates": [],
+    }
+
+    return _base_result(
+        text,
+        explanation,
+        verification_status=verification_status,
+        status_label=status_label,
+        status_explanation=status_explanation,
+        text_status="صحيح",
+        is_truncated=is_partial,
+        missing_part=canonical if is_partial else "",
+        full_text=canonical,
+        source=f"القرآن الكريم — {reference}",
+        danger_level=danger,
+        explanation_status=explanation_status,
+        explanation_verdict=interpretation.get("assessment", ""),
+        correct_explanation=interpretation.get("correction", ""),
+        quotation=quotation,
+        interpretation=interpretation,
+        evidence=evidence,
+        retrieval_ok=True,
+    )
+
+
+def _ambiguous_quran_result(
+    text: str,
+    explanation: str,
+    match: dict,
+) -> dict:
+    refs = [
+        candidate.get("reference", "")
+        for candidate in match.get("candidates", [])
+        if candidate.get("reference")
+    ]
+    shown = "، ".join(refs[:5])
+    reason = (
+        "النص يطابق أكثر من موضع في القرآن"
+        + (f" ({shown})" if shown else "")
+        + "، ولا يمكن الجزم بمرجع واحد. أضف جزءاً أطول من الآية أو "
+        "اذكر اسم السورة ورقم الآية."
+    )
+    result = _inconclusive_result(text, explanation, reason=reason)
+    result["quotation"] = {
+        **_empty_quotation(),
+        "ambiguous": True,
+        "match_type": "ambiguous",
+        "query_tokens": match.get("query_tokens", 0),
+        "candidates": match.get("candidates", []),
+    }
+    result["status_label"] = "غير حاسم — تطابق أكثر من موضع"
+    result["status_explanation"] = reason
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Semantic path for hadith and other source types
+# ---------------------------------------------------------------------------
+
+def _semantic_result(
+    text: str,
+    explanation: str,
+    index,
+    chunks: list[dict],
+    client,
+    *,
+    top_k: int,
+    debug: bool,
+) -> dict:
+    try:
+        wide_results = _dual_search(
+            text, client, index, chunks, top_k * 20, debug=debug,
+        )
+    except Exception as error:
+        if debug:
+            print(f"[DEBUG] Retrieval failed: {error}")
+        return _error_result(
+            text,
+            explanation,
+            message="تعذّر البحث في المصادر. لم يتم إصدار حكم على النص.",
+            retrieval_ok=False,
+        )
 
     # Take the top_k overall, then also ensure the top 3 hadith chunks
     # are included (they may be buried deeper in the ranking).
@@ -387,18 +903,31 @@ def verify_full(
         results.append(r)
         seen_ids.add(r.get("id"))
 
-    # --- Step 2: If explanation provided, search on it too & merge ---
     if explanation:
-        expl_results = _dual_search(
-            explanation, client, index, chunks, wide_k, debug=debug,
+        try:
+            expl_results = _dual_search(
+                explanation, client, index, chunks, top_k * 20, debug=debug,
+            )
+            for r in expl_results:
+                if r.get("id") not in seen_ids:
+                    results.append(r)
+                    seen_ids.add(r.get("id"))
+        except Exception as error:
+            if debug:
+                print(f"[DEBUG] Explanation retrieval failed: {error}")
+
+    if not results:
+        return _inconclusive_result(
+            text,
+            explanation,
+            reason=(
+                "لم نعثر على نص مطابق في المصادر المتاحة. عدم العثور على "
+                "دليل لا يعني بالضرورة أن النص غير صحيح؛ راجع المصدر الأصلي "
+                "أو أعد المحاولة بمقطع أوضح."
+            ),
         )
 
-        for r in expl_results:
-            if r.get("id") not in seen_ids:
-                results.append(r)
-                seen_ids.add(r.get("id"))
-
-    # --- Step 3: Build context ---
+    # --- Build context ---
     sources_text = "\n\n".join(
         f"[مصدر {i + 1}] (تطابق: {r['score']:.2f})\n"
         f"النص: {r['original_text']}\n"
@@ -407,8 +936,7 @@ def verify_full(
         for i, r in enumerate(results)
     )
 
-    # --- Step 3a: Deterministic truncation check (before GPT call) ---
-    # Find the highest-scoring hadith chunk that has metadata["matn"]
+    # --- Deterministic truncation check (before GPT call) ---
     computed_is_truncated = None   # None = don't override
     computed_missing_part = None
     computed_full_text = None
@@ -474,7 +1002,7 @@ def verify_full(
                 else:
                     computed_is_truncated = False
 
-    # --- Step 3b: Build user message ---
+    # --- Build user message ---
     user_parts = [f"النص المدخل: {text}"]
     if explanation:
         user_parts.append(f"الشرح المقدم: {explanation}")
@@ -497,32 +1025,43 @@ def verify_full(
     if debug:
         print(f"\n[DEBUG] User message length: {len(user_message)} chars")
 
-    # --- Step 3c: Call GPT-4o-mini ---
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_message},
-        ],
-        temperature=0,
-        response_format={"type": "json_object"},
-    )
-
-    # --- Step 4: Parse JSON response ---
-    raw_answer = response.choices[0].message.content
+    # --- Call GPT-4o-mini ---
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_message},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        raw_answer = response.choices[0].message.content
+    except Exception as error:
+        if debug:
+            print(f"[DEBUG] Model verification failed: {error}")
+        return _error_result(
+            text,
+            explanation,
+            message=(
+                "تعذّر تقييم النص بواسطة خدمة التحقق. لم يتم إصدار حكم "
+                "على النص."
+            ),
+            retrieval_ok=True,
+        )
 
     if debug:
         print(f"\n[DEBUG] Raw GPT response:\n{raw_answer}")
 
     try:
         answer = json.loads(raw_answer)
-    except json.JSONDecodeError:
+    except (json.JSONDecodeError, TypeError):
         answer = {}
 
     if debug:
         print(f"[DEBUG] Parsed keys: {list(answer.keys())}")
 
-    # --- Step 5: Build result dict with Arabic fallbacks ---
+    # --- Build result dict with Arabic fallbacks ---
     gpt_is_truncated = get_key(
         answer,
         "is_truncated", "هل النص مبتور أو منقوص", "هل النص مبتور", "مبتور",
@@ -558,25 +1097,20 @@ def verify_full(
     )
 
     # --- RAG-02: proportionate post-generation validation ---
-    # Enums keep only values the prompt actually defines; a response with no
-    # retrieved evidence can never attest authenticity.
     text_status = _validated_enum(
         get_key(
             answer,
             "text_status", "صحة_النص", "صحة النص", "الحالة", "حالة_النص",
             "status", "النتيجة",
-            default="غير موجود",
+            default="غير مؤكد",
         ),
         _TEXT_STATUS_VALUES,
-        "غير موجود",
+        "غير مؤكد",
     )
-    if not results:
-        text_status = "غير موجود"
 
     # Citation: a non-empty GPT source is kept only when it matches a
     # reference that was actually retrieved; otherwise it is replaced with
-    # the top retrieved reference (deterministic) or emptied.  An empty
-    # model source is preserved as the safe empty representation.
+    # the top retrieved reference (deterministic) or emptied.
     raw_source = _flatten_source(
         get_key(answer, "source", "المصدر", "مصدر", "المصدر_الموثوق")
     )
@@ -603,39 +1137,333 @@ def verify_full(
     else:
         correct_explanation = ""
 
-    return {
-        "text_status": text_status,
-        "is_truncated": final_is_truncated,
-        "missing_part": final_missing_part,
-        "full_text": final_full_text,
-        "source": source,
-        "danger_level": _validated_enum(
-            get_key(
-                answer,
-                "danger_level", "درجة الخطورة", "درجة_الخطورة", "الخطورة",
-                default="منخفضة",
-            ),
-            _DANGER_LEVEL_VALUES,
-            "منخفضة",
-        ),
-        "explanation_status": _validated_enum(
-            get_key(
-                answer,
-                "explanation_status", "تقييم الشرح", "تقييم_الشرح",
-                "حكم_الشرح",
-                default="لا يوجد",
-            ),
-            _EXPLANATION_STATUS_VALUES,
-            "لا يوجد",
-        ),
-        "explanation_verdict": get_key(
+    explanation_status = _validated_enum(
+        get_key(
             answer,
-            "explanation_verdict", "سبب الحكم", "سبب_الحكم",
+            "explanation_status", "تقييم الشرح", "تقييم_الشرح",
+            "حكم_الشرح",
+            default="لا يوجد",
         ),
-        "correct_explanation": correct_explanation,
-        "input_text": text,
-        "input_explanation": explanation or "",
+        _EXPLANATION_STATUS_VALUES,
+        "لا يوجد",
+    )
+    if explanation and explanation_status == "لا يوجد":
+        explanation_status = "غير مؤكد"
+
+    if not explanation:
+        interpretation = _empty_interpretation(False)
+        explanation_status = NOT_PROVIDED_LABEL
+    else:
+        status_map = {
+            "موافق": ("supported", "التفسير مدعوم بالمصادر"),
+            "مخالف": ("contradicted", "التفسير غير مدعوم أو يخالف المصادر"),
+            "جزئياً موافق": (
+                "partially_supported", "التفسير مدعوم جزئياً",
+            ),
+            "غير مؤكد": ("inconclusive", "المصادر لا تكفي للحكم على التفسير"),
+            "لا يوجد": ("inconclusive", "المصادر لا تكفي للحكم على التفسير"),
+            "تعذّر التقييم": ("error", "تعذّر تقييم التفسير"),
+        }
+        key, label = status_map.get(
+            explanation_status, ("inconclusive", "المصادر لا تكفي للحكم"),
+        )
+        interpretation = {
+            "provided": True,
+            "status": key,
+            "label": label,
+            "assessment": str(get_key(
+                answer, "explanation_verdict", "سبب الحكم", "سبب_الحكم",
+            ) or "").strip(),
+            "correction": correct_explanation,
+            "error": "",
+            "source_status": explanation_status,
+        }
+
+    is_partial = bool(final_is_truncated)
+    found = text_status in {"صحيح", "ضعيف"}
+    if text_status == "موضوع":
+        verification_status = "contradicted"
+        status_label = "المعلومة تخالف الأدلة"
+        status_explanation = (
+            "المصادر المسترجعة تدعم أن هذا النص موضوع أو منسوب خطأً. "
+            "راجع الاقتباس والمصدر."
+        )
+    elif text_status == "غير موجود":
+        # Absence of a lexical match is not proof of fabrication.  Keep the
+        # public status honest instead of presenting the model's absence
+        # verdict as a confirmed fact.
+        text_status = "غير مؤكد"
+        verification_status = "inconclusive"
+        status_label = "لا توجد أدلة كافية"
+        status_explanation = (
+            "لم يؤكد التحقق وجود النص في المصادر المسترجعة. "
+            "هذا لا يعني بالضرورة أنه غير صحيح."
+        )
+    elif is_partial:
+        verification_status = "partial"
+        status_label = "تم التحقق — النص غير مكتمل"
+        status_explanation = (
+            "تم العثور على النص في المصادر، لكنه مختصر أو ناقص مقارنةً "
+            "بالأصل. راجع النص الكامل أدناه."
+        )
+    else:
+        verification_status = "verified"
+        status_label = "تم التحقق — النص مدعوم بالمصادر"
+        status_explanation = (
+            "المصادر المسترجعة تدعم النص. راجع المرجع قبل الاعتماد."
+        )
+
+    if explanation and interpretation["status"] == "contradicted":
+        status_label += " — التفسير غير مدعوم"
+        status_explanation += (
+            " التفسير المقدم لا يوافق ما تدعمه المصادر."
+        )
+    elif explanation and interpretation["status"] == "partially_supported":
+        status_label += " — التفسير مدعوم جزئياً"
+    elif explanation and interpretation["status"] == "error":
+        status_label += " — تعذّر تقييم التفسير"
+
+    if verification_status in {"inconclusive", "error"}:
+        danger = "غير محسوبة"
+    elif explanation:
+        danger = _interpretation_danger(interpretation, is_partial)
+    else:
+        danger = _interpretation_danger(
+            {"status": "not_provided"}, is_partial,
+        )
+
+    if not found:
+        # An inconclusive or contradicted result must not present a retrieved
+        # candidate as the source of the submitted text.
+        source = ""
+
+    quotation = {
+        "found": found,
+        "ambiguous": False,
+        "match_type": "semantic" if found else "none",
+        "is_partial": is_partial,
+        "is_complete": found and not is_partial,
+        "coverage": 0.0,
+        "matched_tokens": 0,
+        "query_tokens": len(normalize(text).split()),
+        "canonical_text": (
+            final_full_text if isinstance(final_full_text, str) else ""
+        ) or (
+            results[0].get("original_text", "") if found else ""
+        ),
+        "reference": (
+            source or _first_retrieved_reference(results)
+        ) if found else "",
+        "source": results[0].get("source", "") if found else "",
+        "surah_name": "",
+        "surah_number": None,
+        "ayah_number": None,
+        "candidates": [],
     }
+
+    evidence = [
+        {
+            "source": r.get("source", ""),
+            "reference": r.get("reference", ""),
+            "text": _evidence_excerpt(r.get("original_text", "")),
+            "role": "retrieved",
+        }
+        for r in results[:5]
+    ]
+    if verification_status == "inconclusive" and not found:
+        evidence_status = "not_relevant" if evidence else "none"
+        evidence_note = (
+            "تم البحث في المصادر، لكن لم يتم العثور على نص مرتبط مباشرة "
+            "بالادعاء؛ لذلك لا تُعرض نصوص مسترجعة قد توحي بدليل غير موجود."
+            if evidence
+            else "لم يتم العثور على نصوص مسترجعة مرتبطة بهذا الادعاء."
+        )
+        evidence = []
+    elif evidence:
+        evidence_status = "relevant"
+        evidence_note = ""
+    else:
+        evidence_status = "none"
+        evidence_note = "لم يتم العثور على نصوص مسترجعة مرتبطة بهذا الادعاء."
+
+    return _base_result(
+        text,
+        explanation,
+        verification_status=verification_status,
+        status_label=status_label,
+        status_explanation=status_explanation,
+        text_status=text_status,
+        is_truncated=is_partial,
+        missing_part=final_missing_part,
+        full_text=final_full_text,
+        source=source,
+        danger_level=danger,
+        explanation_status=explanation_status,
+        explanation_verdict=str(get_key(
+            answer, "explanation_verdict", "سبب الحكم", "سبب_الحكم",
+        ) or "").strip(),
+        correct_explanation=correct_explanation,
+        quotation=quotation,
+        interpretation=interpretation,
+        evidence=evidence,
+        evidence_status=evidence_status,
+        evidence_note=evidence_note,
+        retrieval_ok=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Main verification function
+# ---------------------------------------------------------------------------
+
+def verify_full(
+    text: str,
+    explanation: str | None = None,
+    index: faiss.IndexFlatIP | None = None,
+    chunks: list[dict] | None = None,
+    client=None,
+    top_k: int = 5,
+    debug: bool = False,
+) -> dict:
+    """Verify text authenticity + completeness + optional explanation.
+
+    Pipeline:
+        1. Normalise the text and resolve it lexically against the canonical
+           Quran corpus.  A found quotation returns its exact reference and
+           full canonical verse without any model call.
+        2. If no Quran quotation is found, retrieve hadith/other evidence and
+           use the established verification prompt + citation validation.
+        3. If an explanation is supplied, assess it independently of whether
+           the quotation exists.
+
+    Args:
+        text:        The Arabic text to verify.
+        explanation: Optional explanation/interpretation to evaluate.
+        index:       A loaded FAISS index (loaded automatically if None).
+        chunks:      The chunk dicts aligned with the index.
+        client:      An authenticated OpenAI client (created if None).
+        top_k:       Number of FAISS results to retrieve per search.
+        debug:       If True, print intermediate results.
+
+    Returns:
+        A dict with the legacy 11 keys plus structured verification fields.
+    """
+    text = text or ""
+    explanation = (explanation or "").strip()
+
+    if not text.strip():
+        return _error_result(
+            text,
+            explanation,
+            message="النص مطلوب لإجراء التحقق.",
+        )
+
+    # --- Auto-load resources if not provided ---
+    if chunks is None or index is None:
+        try:
+            loaded_index, loaded_chunks = load_faiss_index()
+            if index is None:
+                index = loaded_index
+            if chunks is None:
+                chunks = loaded_chunks
+        except Exception as error:
+            if debug:
+                print(f"[DEBUG] Resource loading failed: {error}")
+            return _error_result(
+                text,
+                explanation,
+                message=(
+                    "تعذّر تحميل قاعدة المصادر. لم يتم إصدار حكم على النص."
+                ),
+                retrieval_ok=False,
+            )
+
+    # --- Step 0: full-post analysis ---
+    # A complete post contains several claims/quotes and requires separate
+    # source, context, and argument assessments.  Simple single-quotation
+    # inputs keep the established two-stage path below.
+    try:
+        from src.rag.post_analysis import analyze_post, looks_like_post
+
+        if looks_like_post(text):
+            if client is None:
+                try:
+                    client = get_client()
+                except Exception:
+                    client = None
+            post_result = analyze_post(
+                text,
+                explanation,
+                index,
+                chunks,
+                client,
+                top_k=top_k,
+                debug=debug,
+            )
+            if post_result is not None:
+                return post_result
+    except Exception as error:
+        if debug:
+            print(f"[DEBUG] Post analysis failed: {error}")
+        return _error_result(
+            text,
+            explanation,
+            message=(
+                "تعذّر تحليل المنشور أو البحث في المصادر. لم يتم إصدار "
+                "حكم على المحتوى."
+            ),
+            retrieval_ok=False,
+        )
+
+    # --- Step 1: deterministic Quran quotation matching ---
+    try:
+        quotation = match_quran_quotation(text, chunks, debug=debug)
+    except Exception as error:
+        if debug:
+            print(f"[DEBUG] Quran quotation matching failed: {error}")
+        quotation = None
+
+    if quotation and quotation.get("ambiguous"):
+        # A fragment that matches several verses is genuinely ambiguous.
+        # Returning an inconclusive result is safer than letting a semantic
+        # search choose one verse or letting the model declare absence.
+        return _ambiguous_quran_result(text, explanation, quotation)
+
+    if quotation and quotation.get("found"):
+        return _quran_result(
+            text,
+            explanation,
+            quotation,
+            chunks,
+            client,
+            debug=debug,
+        )
+
+    # --- Step 2: semantic path for hadith and other sources ---
+    if client is None:
+        try:
+            client = get_client()
+        except Exception as error:
+            if debug:
+                print(f"[DEBUG] Model client initialization failed: {error}")
+            return _error_result(
+                text,
+                explanation,
+                message=(
+                    "تعذّر تهيئة خدمة التحقق. لم يتم إصدار حكم على النص."
+                ),
+                retrieval_ok=False,
+            )
+
+    return _semantic_result(
+        text,
+        explanation,
+        index,
+        chunks,
+        client,
+        top_k=top_k,
+        debug=debug,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +1499,12 @@ if __name__ == "__main__":
             "text": "الحمد لله رب العالمين",
             "explanation": "رب العالمين تعني أن الله خالق كل شيء ومالكه ومدبره",
         },
+        # Test 5 — اقتباس جزئي
+        {
+            "label": "Test 5 — اقتباس جزئي من النساء 43",
+            "text": "ولا تقربوا الصلاة",
+            "explanation": None,
+        },
     ]
 
     for tc in test_cases:
@@ -691,13 +1525,14 @@ if __name__ == "__main__":
             debug=True,
         )
 
-        print(f"\n  صحة النص:          {result['text_status']}")
+        print(f"\n  حالة التحقق:       {result['verification_status']}")
+        print(f"  العنوان:           {result['status_label']}")
+        print(f"  صحة النص:          {result['text_status']}")
         print(f"  مبتور:             {'نعم' if result['is_truncated'] else 'لا'}")
-        print(f"  الجزء الناقص:      {result['missing_part']}")  # full, no truncation
+        print(f"  المرجع:            {result['quotation']['reference']}")
         print(f"  النص الكامل:       {result['full_text']}")
         print(f"  المصدر:            {result['source']}")
         print(f"  درجة الخطورة:      {result['danger_level']}")
         print(f"  تقييم الشرح:       {result['explanation_status']}")
-        print(f"  سبب الحكم:         {result['explanation_verdict']}")
         print(f"  الشرح الصحيح:      {result['correct_explanation']}")
         print(f"{'=' * 70}")

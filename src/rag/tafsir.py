@@ -9,6 +9,7 @@ not treated as proof that a verse was found.
 
 from __future__ import annotations
 
+import difflib
 import json
 import pickle
 import re
@@ -69,6 +70,10 @@ _REQUEST_PREFIX_PATTERNS = (
     re.compile(
         r"^(?:قوله|قول|كلام)\s+(?:الله\s+)?"
         r"(?:تعالي|عز\s+وجل|جل\s+جلاله)?\s*"
+    ),
+    re.compile(
+        r"^(?:قال|يقول)\s+(?:الله\s+)?"
+        r"(?:تعالي|عز\s+وجل|جل\s+جلاله)\s*"
     ),
     re.compile(r"^(?:تعالي|عز\s+وجل|جل\s+جلاله)\s+"),
     re.compile(
@@ -375,8 +380,20 @@ def _merge_orphan_tokens(tokens: list[str]) -> list[str]:
     return merged
 
 
-def _token_variants(text: str) -> set[tuple[str, ...]]:
-    """Return normalized token variants used for verse matching."""
+def _token_variants(
+    text: str,
+    *,
+    strip_leading_conjunction: bool = False,
+) -> set[tuple[str, ...]]:
+    """Return normalized token variants used for verse matching.
+
+    ``strip_leading_conjunction`` is for *query* text only.  A quotation
+    often begins with a conjunction (``ولا تقربوا...``) while the canonical
+    verse begins with the bare word (``لا تقربوا...``).  Applying the same
+    fold to canonical verses would make ``الحمد لله رب العالمين`` collide
+    with ``والحمد لله رب العالمين`` (1:2 and 37:182), so verse variants keep
+    their original leading word.
+    """
     variants: set[tuple[str, ...]] = set()
     for expand in (True, False):
         for alef_maqsura in ("keep", "alef"):
@@ -391,6 +408,12 @@ def _token_variants(text: str) -> set[tuple[str, ...]]:
             variants.add(tokens)
             if len(tokens) > 1 and tokens[0] == "يا":
                 variants.add((tokens[0] + tokens[1],) + tokens[2:])
+            if (
+                strip_leading_conjunction
+                and len(tokens[0]) > 2
+                and tokens[0][0] in ("و", "ف")
+            ):
+                variants.add((tokens[0][1:],) + tokens[1:])
     return variants
 
 
@@ -793,12 +816,21 @@ def _exact_verse_match(text: str, verse_map: dict) -> list[dict]:
     exact: list[dict] = []
     for variant in _token_variants(text):
         exact.extend(verse_map["by_exact"].get(" ".join(variant), []))
+    if exact:
+        return _sort_chunks(_dedupe_chunks(exact))
+
+    # Only when the original wording matches no complete verse do we try the
+    # conjunction-stripped quotation form.  This lets "ولا تقربوا الصلاة"
+    # reach 4:43 without making "والحمد لله رب العالمين" (37:182) collide
+    # with the bare "الحمد لله رب العالمين" (1:2).
+    for variant in _token_variants(text, strip_leading_conjunction=True):
+        exact.extend(verse_map["by_exact"].get(" ".join(variant), []))
     return _sort_chunks(_dedupe_chunks(exact))
 
 
 def _short_partial_verse_match(text: str, verse_map: dict) -> list[dict]:
     """Match a one- or two-word fragment against the verse corpus."""
-    variants = _token_variants(text)
+    variants = _token_variants(text, strip_leading_conjunction=True)
     if not variants:
         return []
     if any(len(variant) > 2 for variant in variants):
@@ -830,7 +862,9 @@ def _longest_ngram_match(
     seen_chunks: set[int] = set()
 
     for text in texts:
-        for tokens in _token_variants(text):
+        for tokens in _token_variants(
+            text, strip_leading_conjunction=True,
+        ):
             for start in range(len(tokens) - 2):
                 trigram = tokens[start:start + 3]
                 for chunk, verse_tokens, position in verse_map[
@@ -901,6 +935,220 @@ def _match_verse_text(
     if partial:
         return partial, "partial"
     return [], ""
+
+
+def _best_contiguous_match(
+    query_variants: set[tuple[str, ...]],
+    verse_variants: set[tuple[str, ...]],
+) -> tuple[int, int, int, bool]:
+    """Return (matched_len, query_len, verse_start, covers_whole_verse).
+
+    Only a contiguous sequence of query tokens counts.  A quotation may be a
+    fragment of a verse, but re-ordered or scattered words are not treated as
+    a verbatim quotation.
+    """
+    best_len = 0
+    best_query_len = 0
+    best_start = 0
+    covers_whole = False
+
+    for query in query_variants:
+        if not query:
+            continue
+        for verse in verse_variants:
+            if len(query) > len(verse):
+                continue
+            for start in range(len(verse) - len(query) + 1):
+                if verse[start:start + len(query)] != query:
+                    continue
+                whole = len(query) == len(verse)
+                if len(query) > best_len or (whole and not covers_whole):
+                    best_len = len(query)
+                    best_query_len = len(query)
+                    best_start = start
+                    covers_whole = whole
+                break
+
+    return best_len, best_query_len, best_start, covers_whole
+
+
+def _fuzzy_verse_match(
+    text: str,
+    verse_map: dict,
+) -> list[tuple[dict, float]]:
+    """Find a tightly bounded approximate verse match.
+
+    This is only a fallback after exact and verbatim-partial matching have
+    failed.  It requires at least four query tokens and a token-sequence
+    similarity of 0.90, so a single ordinary word can never be attributed to
+    a verse and a re-ordered phrase is not mistaken for a quotation.
+    """
+    query_variants = {
+        variant
+        for variant in _token_variants(
+            text, strip_leading_conjunction=True,
+        )
+        if len(variant) >= 4
+    }
+    if not query_variants:
+        return []
+
+    matches: list[tuple[dict, float]] = []
+    for chunk, verse_variants in verse_map["entries"]:
+        best_ratio = 0.0
+        for query in query_variants:
+            for verse in verse_variants:
+                if abs(len(verse) - len(query)) > max(2, len(query) // 5):
+                    continue
+                ratio = difflib.SequenceMatcher(
+                    None, query, verse, autojunk=False,
+                ).ratio()
+                best_ratio = max(best_ratio, ratio)
+        if best_ratio >= 0.90:
+            matches.append((chunk, best_ratio))
+
+    matches.sort(key=lambda item: item[1], reverse=True)
+    return matches
+
+
+def match_quran_quotation(
+    text: str,
+    chunks: list[dict],
+    *,
+    debug: bool = False,
+) -> dict:
+    """Resolve *text* against the canonical Quran corpus.
+
+    The result is deterministic and lexical.  Semantic similarity is never
+    consulted here, so a result of ``found=True`` always points to an actual
+    canonical verse record.  ``is_complete`` is true only when the submitted
+    text covers the whole verse; a verbatim fragment is reported as a partial
+    quotation with its exact reference.
+    """
+    verse_map = _get_verse_map(chunks)
+    normalized = normalize_verse_text(text)
+    quoted = tuple(_extract_quoted_texts(text))
+    candidates, match_kind = _match_verse_text(
+        text, verse_map, quoted_texts=quoted,
+    )
+
+    base = {
+        "found": False,
+        "ambiguous": False,
+        "match_type": "none",
+        "is_partial": False,
+        "is_complete": False,
+        "coverage": 0.0,
+        "matched_tokens": 0,
+        "query_tokens": len(normalized.split()),
+        "canonical_text": "",
+        "reference": "",
+        "source": "",
+        "surah_name": "",
+        "surah_number": None,
+        "ayah_number": None,
+        "chunk": None,
+        "candidates": [],
+    }
+
+    if len(candidates) > 1:
+        return {
+            **base,
+            "ambiguous": True,
+            "match_type": "ambiguous",
+            "candidates": [
+                {
+                    "reference": candidate.get("reference", ""),
+                    "source": candidate.get("source", ""),
+                    "text": candidate.get("original_text", ""),
+                }
+                for candidate in candidates[:_MAX_AMBIGUITY_CANDIDATES]
+            ],
+        }
+
+    if len(candidates) == 1:
+        chunk = candidates[0]
+        query_variants: set[tuple[str, ...]] = set()
+        for candidate_text in (
+            normalized,
+            *quoted,
+            _strip_request_framing(text),
+        ):
+            if candidate_text:
+                query_variants.update(_token_variants(
+                    candidate_text, strip_leading_conjunction=True,
+                ))
+        verse_variants = _token_variants(
+            chunk.get("original_text", "") or "",
+        )
+        matched, query_len, _start, complete = _best_contiguous_match(
+            query_variants, verse_variants,
+        )
+        if matched <= 0:
+            return base
+
+        metadata = chunk.get("metadata") or {}
+        return {
+            **base,
+            "found": True,
+            "match_type": "exact" if complete else "partial",
+            "is_partial": not complete,
+            "is_complete": complete,
+            "coverage": (
+                round(query_len / matched, 4) if matched else 0.0
+            ),
+            "matched_tokens": matched,
+            "query_tokens": query_len,
+            "canonical_text": chunk.get("original_text", ""),
+            "reference": chunk.get("reference", ""),
+            "source": chunk.get("source", "quran"),
+            "surah_name": metadata.get("surah_name", ""),
+            "surah_number": metadata.get("surah_number"),
+            "ayah_number": metadata.get("ayah_number"),
+            "chunk": chunk,
+        }
+
+    fuzzy = _fuzzy_verse_match(text, verse_map)
+    if fuzzy:
+        best_ratio = fuzzy[0][1]
+        top = [item for item in fuzzy if item[1] == best_ratio]
+        if len(top) > 1:
+            return {
+                **base,
+                "ambiguous": True,
+                "match_type": "ambiguous",
+                "candidates": [
+                    {
+                        "reference": chunk.get("reference", ""),
+                        "source": chunk.get("source", ""),
+                        "text": chunk.get("original_text", ""),
+                    }
+                    for chunk, _ratio in top[:_MAX_AMBIGUITY_CANDIDATES]
+                ],
+            }
+        chunk, ratio = top[0]
+        metadata = chunk.get("metadata") or {}
+        return {
+            **base,
+            "found": True,
+            "match_type": "approximate",
+            "is_partial": True,
+            "is_complete": False,
+            "coverage": round(ratio, 4),
+            "matched_tokens": len(normalized.split()),
+            "query_tokens": len(normalized.split()),
+            "canonical_text": chunk.get("original_text", ""),
+            "reference": chunk.get("reference", ""),
+            "source": chunk.get("source", "quran"),
+            "surah_name": metadata.get("surah_name", ""),
+            "surah_number": metadata.get("surah_number"),
+            "ayah_number": metadata.get("ayah_number"),
+            "chunk": chunk,
+        }
+
+    if debug:
+        print(f"[DEBUG] No canonical Quran quotation for {text!r}")
+    return base
 
 
 def _build_resolution(

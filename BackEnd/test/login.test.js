@@ -136,3 +136,27 @@ test("login rejects an incorrect password", async () => {
   assert.equal(response.status, 401);
   assert.equal((await response.json()).message, "البريد الإلكتروني أو كلمة المرور غير صحيحة");
 });
+
+test("rate-limit responses remain readable by allowed browser origins", async () => {
+  let limited = null;
+  for (let attempt = 0; attempt < 120; attempt += 1) {
+    const response = await fetch(`${baseUrl}/usage`, {
+      headers: { Origin: origin },
+    });
+    if (response.status === 429) {
+      limited = response;
+      break;
+    }
+  }
+
+  assert.ok(limited, "expected the limiter to reject a request");
+  assert.equal(
+    limited.headers.get("access-control-allow-origin"),
+    origin,
+  );
+  assert.equal(
+    limited.headers.get("access-control-allow-credentials"),
+    "true",
+  );
+  assert.match(await limited.text(), /طلبات كثيرة/);
+});

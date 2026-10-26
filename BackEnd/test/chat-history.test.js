@@ -468,3 +468,21 @@ test("concurrent submissions with the same client key create one user message", 
   });
   assert.equal(empty, 0);
 });
+
+test("conversation message limit returns an actionable Arabic error", async () => {
+  const conversation = await Conversation.create({
+    userId: userOne._id,
+    title: "limit-test",
+    messageCount: 9,
+  });
+  const before = ragRequests.length;
+  const result = await sendMessage(cookieOne, "رسالة بعد الحد", {
+    conversationId: conversation._id,
+    clientMessageId: `limit-${crypto.randomUUID()}`,
+  });
+
+  assert.equal(result.status, 403);
+  assert.match(result.body.message, /الحد الأقصى لعدد الرسائل/);
+  assert.match(result.body.message, /ابدأ محادثة جديدة/);
+  assert.equal(ragRequests.length, before);
+});

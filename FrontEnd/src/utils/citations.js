@@ -6,6 +6,7 @@ const SOURCE_TYPE_AR = {
   tafsir: "تفسير",
   fiqh: "فقه",
   sira: "سيرة",
+  website: "الموقع",
 };
 
 function sourceReference(source) {
@@ -73,4 +74,36 @@ export function citedSourceLabels(text, sources) {
     labels.push(segment.text.slice(1, -1));
   }
   return labels;
+}
+
+
+function isWebsiteSource(source) {
+  if (source && typeof source === "object") {
+    const type = String(source.type || source.source || "").toLowerCase();
+    if (type === "website") return true;
+  }
+  const label = formatSourceLabel(source);
+  return (
+    label.includes("موقع بصيرة") ||
+    /^website\s+[—–-]/i.test(label) ||
+    /^الموقع\s+[—–-]/.test(label)
+  );
+}
+
+export function displaySourceLabels(text, sources) {
+  const value = String(text || "");
+  const list = Array.isArray(sources) ? sources : [];
+  if (value.includes("لم أجد في المصادر المتاحة")) return [];
+
+  // The answer text is the source of truth for what was actually used.
+  // Website help has its own canonical source but is not cited inline.
+  const websiteLabels = list
+    .filter(isWebsiteSource)
+    .map(formatSourceLabel)
+    .filter(Boolean);
+  const hasCitationMarker = /مصدر\s*\d+/.test(value);
+  const labels = hasCitationMarker
+    ? [...citedSourceLabels(value, list), ...websiteLabels]
+    : websiteLabels;
+  return Array.from(new Set(labels));
 }

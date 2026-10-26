@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import { verifyText } from "../services/basiraService";
-import FormattedResult from "../components/FormattedResult";
+import VerificationResult from "../components/VerificationResult";
 import { arabicMessage } from "../utils/format";
 import "../styles/tools.css";
+import "../styles/verification.css";
 
 const RESULT_FALLBACK =
   "لم تصل تفاصيل النتيجة. جرّب مرة أخرى أو اختصر النص قليلًا.";
@@ -70,10 +71,11 @@ function Verify() {
       <div className="container tool-shell">
         <header className="page-header tool-header" data-reveal>
           <p className="eyebrow">أداة التحقق</p>
-          <h1>تحقق من النص قبل أن تعتمد عليه</h1>
+          <h1>تحقق من المنشور كاملًا قبل أن تعتمد عليه</h1>
           <p>
-            الصق نصًا أو معلومة لديك. ستعرض الأداة ما تدعمه المصادر وما يحتاج
-            إلى مراجعة، لتصل إلى قرار أوضح.
+            الصق المنشور كما نُشر: الاقتباسات، والشرح، والنتيجة التي يريد
+            الكاتب الوصول إليها. ستفصل الأداة بين صحة النقل، واكتمال السياق،
+            وصحة الاستدلال.
           </p>
         </header>
 
@@ -85,16 +87,18 @@ function Verify() {
                   <i className="bi bi-shield-check"></i>
                 </span>
                 <div>
-                  <h2 id="verify-form-title">النص المراد التحقق منه</h2>
-                  <p>أدخل النص كما هو، ثم راجع النتيجة بهدوء.</p>
+                  <h2 id="verify-form-title">المنشور المراد التحقق منه</h2>
+                  <p>أدخل المنشور كاملًا كما هو، ثم راجع النتيجة بهدوء.</p>
                 </div>
               </div>
 
               <form className="tool-form" onSubmit={handleSubmit} noValidate>
                 <div className="field">
                   <label htmlFor="verify-text">
-                    النص
-                    <span className="tool-required">مطلوب</span>
+                    <span>
+                      المنشور كاملًا{" "}
+                      <span className="tool-required">مطلوب</span>
+                    </span>
                   </label>
                   <textarea
                     id="verify-text"
@@ -107,8 +111,8 @@ function Verify() {
                       if (error) setError("");
                     }}
                     onKeyDown={handleKeyDown}
-                    placeholder="اكتب أو الصق النص الذي تريد فحصه…"
-                    rows={7}
+                    placeholder="الصق المنشور هنا: الاقتباسات والشرح والاستنتاجات…"
+                    rows={10}
                     aria-invalid={Boolean(fieldError)}
                     aria-describedby={
                       fieldError ? "verify-text-error" : "verify-text-hint"
@@ -129,7 +133,8 @@ function Verify() {
                     </span>
                   ) : (
                     <span className="field-hint" id="verify-text-hint">
-                      كلما كان النص كاملًا وواضحًا، كانت المراجعة أدق.
+                      كلما كان المنشور كاملًا، أمكن فصل الاقتباس عن الشرح
+                      والاستنتاج بدقة.
                     </span>
                   )}
                 </div>
@@ -192,8 +197,8 @@ function Verify() {
                 <div className="tool-loading-head">
                   <span className="spinner" aria-hidden="true"></span>
                   <div>
-                    <strong>جارٍ مراجعة النص…</strong>
-                    <p>نقارن ما كتبته بما ورد في المصادر.</p>
+                    <strong>جارٍ تحليل المنشور…</strong>
+                    <p>نفصل الاقتباسات عن الشرح والاستنتاج ونراجعها.</p>
                   </div>
                 </div>
                 <div className="tool-skeleton-lines" aria-hidden="true">
@@ -215,7 +220,7 @@ function Verify() {
                     className="tool-result-head-icon"
                     aria-hidden="true"
                   >
-                    <i className="bi bi-check2-circle"></i>
+                    <i className="bi bi-clipboard-check"></i>
                   </span>
                   <div>
                     <h2 id="verify-result-title">نتيجة التحقق</h2>
@@ -226,7 +231,7 @@ function Verify() {
                   </div>
                 </header>
 
-                <FormattedResult data={result} />
+                <VerificationResult data={result} />
               </section>
             ) : null}
           </div>
@@ -236,8 +241,16 @@ function Verify() {
             <ol className="tool-guide-list">
               <li>
                 <span>
-                  <strong>اكتب النص كما هو</strong>
-                  لا تعِد صياغته، حتى ترى النتيجة قراءة دقيقة لما لديك.
+                  <strong>الصق المنشور كاملًا</strong>
+                  لا تعِد صياغته، حتى ترى النتيجة قراءة دقيقة للاقتباس
+                  والشرح والاستنتاج.
+                </span>
+              </li>
+              <li>
+                <span>
+                  <strong>افصل بين ثلاثة أسئلة</strong>
+                  هل النقل صحيح؟ هل السياق مكتمل؟ هل الاستدلال يدعمه
+                  المصدر؟
                 </span>
               </li>
               <li>

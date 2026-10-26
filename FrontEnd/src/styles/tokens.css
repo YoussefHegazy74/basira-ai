@@ -18,6 +18,7 @@
   --surface: #fbf7f0;
   --surface-raised: #fbf7f0;
   --surface-muted: #efe7d9;
+  --surface-hover: var(--surface-muted);
   --surface-strong: #e4d9c6;
   --surface-overlay: #fbf7f0;
   --surface-inverse: #2a211a;
@@ -93,6 +94,7 @@
   --background: #26211c;
   --surface-muted: #2e2822;
   --surface: #37312a;
+  --surface-hover: var(--surface-overlay);
   --surface-strong: #413a32;
   --surface-overlay: #4b433a;
   --surface-raised: #413a32;

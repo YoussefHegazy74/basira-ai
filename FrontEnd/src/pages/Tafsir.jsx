@@ -93,8 +93,10 @@ function Tafsir() {
               <form className="tool-form" onSubmit={handleSubmit} noValidate>
                 <div className="field">
                   <label htmlFor="tafsir-ayah">
-                    الآية أو جزء منها
-                    <span className="tool-required">مطلوب</span>
+                    <span>
+                      الآية أو جزء منها{" "}
+                      <span className="tool-required">مطلوب</span>
+                    </span>
                   </label>
                   <textarea
                     id="tafsir-ayah"

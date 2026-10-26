@@ -9,7 +9,7 @@ const askModel = async (text, explanation = "") => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, explanation }),
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(120000),
     });
 
     if (!response.ok) {
@@ -19,8 +19,12 @@ const askModel = async (text, explanation = "") => {
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error("AI model failed:", error.message);
-    throw new AppError(502, "فشل نموذج الذكاء الاصطناعي", HttpStatus.ERROR);
+    console.error("Verification service failed:", error.message);
+    throw new AppError(
+      502,
+      "تعذّر إكمال التحقق من المعلومات",
+      HttpStatus.ERROR,
+    );
   }
 };
 
@@ -54,4 +58,4 @@ const userVerify = async (text, explanation, userId, guestKey) => {
   return await askModel(text, explanation);
 };
 
-module.exports = { verify };
+module.exports = { verify, askModel };

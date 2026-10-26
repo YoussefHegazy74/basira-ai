@@ -137,6 +137,10 @@
 }
 
 .field label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
   color: var(--text);
   font-size: 0.875rem;
   font-weight: 600;

@@ -1,15 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-import { useChatNavigation } from "../context/ChatNavigationContext";
 import BasiraLogo from "./BasiraLogo";
 import ThemeToggle from "./ThemeToggle";
-import { formatNumber, initials } from "../utils/format";
+import { initials } from "../utils/format";
 
-const EXPANDED_KEY = "basira.nav.expanded";
-
-const NAV_ITEMS = [
-  { to: "/", label: "الرئيسية", icon: "bi-house", end: true },
+const SERVICES = [
   {
     to: "/chat",
     label: "المساعد المعرفي",
@@ -25,485 +21,492 @@ const NAV_ITEMS = [
     label: "البحث في التفسير",
     icon: "bi-book",
   },
-  { to: "/services", label: "الخدمات", icon: "bi-grid" },
-  { to: "/about", label: "عن بصيرة", icon: "bi-info-circle" },
-  {
-    to: "/admin",
-    label: "لوحة الإدارة",
-    icon: "bi-speedometer2",
-    admin: true,
-  },
 ];
 
-function conversationTitle(item) {
-  return item?.title || "محادثة جديدة";
-}
-
-function readExpanded() {
-  try {
-    const saved = localStorage.getItem(EXPANDED_KEY);
-    if (saved === "true") return true;
-    if (saved === "false") return false;
-  } catch {
-    /* storage unavailable */
-  }
-  return true;
+function isServicePath(pathname) {
+  return SERVICES.some((service) => pathname === service.to);
 }
 
 function Navbar() {
   const { user, authLoading } = useAuth();
-  const {
-    conversations,
-    activeId,
-    loaded,
-    busy,
-    actions,
-  } = useChatNavigation();
   const location = useLocation();
-  const navigate = useNavigate();
 
-  const [expanded, setExpanded] = useState(readExpanded);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [mobileServicesOpen, setMobileServicesOpen] = useState(false);
+  const [servicesOpen, setServicesOpen] = useState(false);
+  const [servicesVisible, setServicesVisible] = useState(false);
+  const [servicesPosition, setServicesPosition] = useState(null);
 
-  const railRef = useRef(null);
-  const searchRef = useRef(null);
   const menuButtonRef = useRef(null);
+  const panelRef = useRef(null);
+  const servicesWrapperRef = useRef(null);
+  const servicesTriggerRef = useRef(null);
+  const servicesMenuRef = useRef(null);
+  const servicesCloseTimerRef = useRef(null);
+  const servicesOpenIntentRef = useRef(false);
 
-  const isChat = location.pathname === "/chat";
-  const searchHistory = isChat && Boolean(user);
+  const isServicesRoute = isServicePath(location.pathname);
   const displayName =
     [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
     user?.name ||
     user?.email ||
     "المستخدم";
-  const query = searchQuery.trim().toLowerCase();
 
-  const visibleNavItems = NAV_ITEMS.filter((item) => {
-    if (item.admin && user?.role !== "admin") return false;
-    if (!searchHistory && query) {
-      return item.label.toLowerCase().includes(query);
+  const adminItem =
+    user?.role === "admin"
+      ? { to: "/admin", label: "لوحة الإدارة" }
+      : null;
+
+  function focusServicesTrigger() {
+    servicesTriggerRef.current?.focus();
+  }
+
+  function positionServices() {
+    const trigger = servicesTriggerRef.current;
+    if (!trigger) return;
+
+    const rect = trigger.getBoundingClientRect();
+    const header = trigger.closest(".site-header");
+    const headerBottom =
+      header?.getBoundingClientRect().bottom ?? rect.bottom;
+    const width = Math.min(600, window.innerWidth - 24);
+    const centered = rect.left + rect.width / 2 - width / 2;
+    const left = Math.min(
+      Math.max(12, centered),
+      Math.max(12, window.innerWidth - width - 12)
+    );
+
+    setServicesPosition({
+      left: Math.round(left),
+      top: Math.round(headerBottom + 10),
+      width: Math.round(width),
+    });
+  }
+
+  function openServices() {
+    servicesOpenIntentRef.current = true;
+
+    if (servicesCloseTimerRef.current) {
+      window.clearTimeout(servicesCloseTimerRef.current);
+      servicesCloseTimerRef.current = null;
     }
-    return true;
-  });
 
-  const visibleConversations = conversations.filter((item) => {
-    if (!searchHistory || !query) return true;
-    return conversationTitle(item).toLowerCase().includes(query);
-  });
+    positionServices();
+
+    if (!servicesVisible) {
+      setServicesOpen(false);
+      setServicesVisible(true);
+      return;
+    }
+
+    setServicesOpen(true);
+  }
+
+  function closeServices({ restoreFocus = false } = {}) {
+    servicesOpenIntentRef.current = false;
+
+    if (servicesCloseTimerRef.current) {
+      window.clearTimeout(servicesCloseTimerRef.current);
+    }
+
+    setServicesOpen(false);
+    servicesCloseTimerRef.current = window.setTimeout(() => {
+      setServicesVisible(false);
+      servicesCloseTimerRef.current = null;
+    }, 180);
+
+    if (restoreFocus) focusServicesTrigger();
+  }
+
+  function toggleServices() {
+    if (servicesOpenIntentRef.current) closeServices({ restoreFocus: true });
+    else openServices();
+  }
+
+  function handleServicesKeyDown(event) {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeServices({ restoreFocus: true });
+      return;
+    }
+
+    if (event.key === "Tab") {
+      event.preventDefault();
+      closeServices({ restoreFocus: true });
+      return;
+    }
+
+    const items = Array.from(
+      servicesMenuRef.current?.querySelectorAll('[role="menuitem"]') || []
+    );
+    if (!items.length) return;
+
+    const currentIndex = items.indexOf(document.activeElement);
+    const rtl = document.documentElement.dir === "rtl";
+    let nextIndex = null;
+
+    if (event.key === "Home") nextIndex = 0;
+    else if (event.key === "End") nextIndex = items.length - 1;
+    else if (event.key === "ArrowDown") nextIndex = currentIndex + 1;
+    else if (event.key === "ArrowUp") nextIndex = currentIndex - 1;
+    else if (event.key === "ArrowLeft") nextIndex = currentIndex + (rtl ? 1 : -1);
+    else if (event.key === "ArrowRight") nextIndex = currentIndex + (rtl ? -1 : 1);
+
+    if (nextIndex === null) return;
+
+    event.preventDefault();
+    const bounded = (nextIndex + items.length) % items.length;
+    items[bounded].focus();
+  }
 
   useEffect(() => {
     setMobileOpen(false);
-    setSearchQuery("");
+    setMobileServicesOpen(false);
+    if (servicesVisible) closeServices();
+    // Only react to route changes; menu close is handled by the functions above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
+
+  useEffect(() => {
+    if (!servicesVisible) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      if (servicesOpenIntentRef.current) setServicesOpen(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [servicesVisible]);
+
+  useEffect(() => {
+    if (!servicesOpen) return undefined;
+
+    const frame = window.requestAnimationFrame(() => {
+      servicesMenuRef.current
+        ?.querySelector('[role="menuitem"]')
+        ?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [servicesOpen]);
+
+  useEffect(() => {
+    if (!servicesVisible) return undefined;
+
+    function handlePointerDown(event) {
+      if (!servicesWrapperRef.current?.contains(event.target)) {
+        closeServices();
+      }
+    }
+
+    function handleResize() {
+      if (window.innerWidth <= 767) {
+        closeServices();
+        return;
+      }
+      positionServices();
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("resize", handleResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [servicesVisible]);
+
+  useEffect(() => {
+    return () => {
+      if (servicesCloseTimerRef.current) {
+        window.clearTimeout(servicesCloseTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!mobileOpen) return undefined;
 
-    const closeButton = railRef.current?.querySelector(".rail-close");
-    closeButton?.focus();
+    const firstLink = panelRef.current?.querySelector("a, button");
+    firstLink?.focus();
 
     function handleKeyDown(event) {
       if (event.key === "Escape") {
         setMobileOpen(false);
         menuButtonRef.current?.focus();
-        return;
-      }
-
-      if (event.key !== "Tab") return;
-
-      const focusable = Array.from(
-        railRef.current?.querySelectorAll(
-          'a[href], button:not([disabled]), input:not([disabled]), summary'
-        ) || []
-      ).filter((element) => element.offsetParent !== null);
-
-      if (!focusable.length) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
       }
     }
 
     document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [mobileOpen]);
-
-  function toggleExpanded() {
-    setExpanded((current) => {
-      const next = !current;
-      try {
-        localStorage.setItem(EXPANDED_KEY, String(next));
-      } catch {
-        /* storage unavailable */
-      }
-      return next;
-    });
-  }
-
-  function openMobile() {
-    setExpanded(true);
-    setMobileOpen(true);
-  }
-
-  function closeMobile() {
-    const wasOpen = mobileOpen;
-    setMobileOpen(false);
-    if (wasOpen) menuButtonRef.current?.focus();
-  }
-
-  function focusSearch() {
-    if (!expanded) {
-      setExpanded(true);
-      try {
-        localStorage.setItem(EXPANDED_KEY, "true");
-      } catch {
-        /* storage unavailable */
-      }
-      window.setTimeout(() => searchRef.current?.focus(), 60);
-      return;
-    }
-
-    searchRef.current?.focus();
-  }
-
-  function handleNewChat() {
-    setMobileOpen(false);
-    setSearchQuery("");
-    navigate("/chat", { state: { newChat: Date.now() } });
-  }
-
-  function handleOpenConversation(item) {
-    actions.open(item);
-    setMobileOpen(false);
-    window.setTimeout(() => {
-      document.querySelector(".chat-app")?.focus();
-    }, 80);
-  }
-
-  function handleRename(item) {
-    actions.rename(item);
-    setMobileOpen(false);
-  }
-
-  function handleRemove(item) {
-    actions.remove(item);
-    setMobileOpen(false);
-  }
 
   return (
     <>
-      <header className="mobile-topbar">
-        <button
-          type="button"
-          className="mobile-menu-button"
-          ref={menuButtonRef}
-          onClick={openMobile}
-          aria-label="فتح قائمة التنقل"
-          aria-controls="app-rail"
-          aria-expanded={mobileOpen}
-          title="القائمة"
-        >
-          <i className="bi bi-list" aria-hidden="true"></i>
-        </button>
+      <header className="site-header">
+        <div className="site-header-inner">
+          <Link
+            className="site-brand"
+            to="/"
+            aria-label="بصيرة، الصفحة الرئيسية"
+          >
+            <BasiraLogo size="md" />
+          </Link>
 
-        <Link
-          className="mobile-brand"
-          to="/"
-          aria-label="بصيرة، الصفحة الرئيسية"
-        >
-          <BasiraLogo size="md" />
-        </Link>
+          <nav className="site-nav" aria-label="التنقل الرئيسي">
+            <NavLink
+              className={({ isActive }) =>
+                `site-nav-link${isActive ? " is-active" : ""}`
+              }
+              to="/"
+              end
+            >
+              الرئيسية
+            </NavLink>
 
-        <span className="mobile-topbar-spacer" aria-hidden="true" />
+            <div className="site-services" ref={servicesWrapperRef}>
+              <button
+                type="button"
+                ref={servicesTriggerRef}
+                className={`site-nav-link site-services-trigger${
+                  isServicesRoute ? " is-active" : ""
+                }${servicesOpen ? " is-open" : ""}`}
+                onClick={toggleServices}
+                onKeyDown={(event) => {
+                  if (event.key === "ArrowDown") {
+                    event.preventDefault();
+                    openServices();
+                  }
+                }}
+                aria-haspopup="menu"
+                aria-expanded={servicesOpen}
+                aria-controls="site-services-menu"
+              >
+                <span>الخدمات</span>
+                <i
+                  className="bi bi-chevron-down site-services-chevron"
+                  aria-hidden="true"
+                ></i>
+              </button>
+
+              {servicesVisible ? (
+                <div
+                  className={`services-capsule${
+                    servicesOpen ? " is-open" : ""
+                  }`}
+                  id="site-services-menu"
+                  ref={servicesMenuRef}
+                  role="menu"
+                  aria-label="الخدمات"
+                  aria-hidden={servicesOpen ? undefined : "true"}
+                  inert={servicesOpen ? undefined : true}
+                  style={
+                    servicesPosition
+                      ? {
+                          left: `${servicesPosition.left}px`,
+                          top: `${servicesPosition.top}px`,
+                          width: `${servicesPosition.width}px`,
+                        }
+                      : undefined
+                  }
+                  onKeyDown={handleServicesKeyDown}
+                >
+                  {SERVICES.map((service, index) => (
+                    <NavLink
+                      key={service.to}
+                      className={({ isActive }) =>
+                        `services-capsule-item${
+                          isActive ? " is-active" : ""
+                        }`
+                      }
+                      to={service.to}
+                      role="menuitem"
+                      style={{ "--service-index": index }}
+                      onClick={() => closeServices()}
+                    >
+                      <i
+                        className={`bi ${service.icon}`}
+                        aria-hidden="true"
+                      ></i>
+                      <span>{service.label}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <NavLink
+              className={({ isActive }) =>
+                `site-nav-link${isActive ? " is-active" : ""}`
+              }
+              to="/about"
+            >
+              عن بصيرة
+            </NavLink>
+
+            {adminItem ? (
+              <NavLink
+                className={({ isActive }) =>
+                  `site-nav-link${isActive ? " is-active" : ""}`
+                }
+                to={adminItem.to}
+              >
+                {adminItem.label}
+              </NavLink>
+            ) : null}
+          </nav>
+
+          <div className="site-actions">
+            <ThemeToggle />
+
+            {authLoading ? (
+              <span className="site-user-loading" aria-hidden="true" />
+            ) : user ? (
+              <Link
+                className="site-user"
+                to="/profile"
+                title={displayName}
+                aria-label={`الحساب: ${displayName}`}
+              >
+                <span className="avatar" aria-hidden="true">
+                  {initials(displayName, "ب")}
+                </span>
+                <span className="site-user-name">{displayName}</span>
+              </Link>
+            ) : (
+              <Link className="site-signin" to="/signin">
+                <i className="bi bi-person" aria-hidden="true"></i>
+                <span>تسجيل الدخول</span>
+              </Link>
+            )}
+
+            <button
+              type="button"
+              className="site-menu-toggle"
+              ref={menuButtonRef}
+              onClick={() => {
+                setMobileOpen((current) => !current);
+                closeServices();
+              }}
+              aria-label={
+                mobileOpen ? "إغلاق قائمة التنقل" : "فتح قائمة التنقل"
+              }
+              aria-controls="site-mobile-nav"
+              aria-expanded={mobileOpen}
+              title="القائمة"
+            >
+              <i
+                className={mobileOpen ? "bi bi-x-lg" : "bi bi-list"}
+                aria-hidden="true"
+              ></i>
+            </button>
+          </div>
+        </div>
+
+        {mobileOpen ? (
+          <nav
+            className="site-mobile-nav"
+            id="site-mobile-nav"
+            ref={panelRef}
+            aria-label="روابط الموقع"
+          >
+            <NavLink
+              className={({ isActive }) =>
+                `site-mobile-link${isActive ? " is-active" : ""}`
+              }
+              to="/"
+              end
+              onClick={() => setMobileOpen(false)}
+            >
+              الرئيسية
+              <i className="bi bi-chevron-left" aria-hidden="true"></i>
+            </NavLink>
+
+            <div className="site-mobile-services">
+              <button
+                type="button"
+                className={`site-mobile-link site-mobile-services-trigger${
+                  isServicesRoute ? " is-active" : ""
+                }${mobileServicesOpen ? " is-open" : ""}`}
+                onClick={() => setMobileServicesOpen((current) => !current)}
+                aria-expanded={mobileServicesOpen}
+                aria-controls="site-mobile-services-panel"
+              >
+                <span>الخدمات</span>
+                <i
+                  className="bi bi-chevron-down site-mobile-chevron"
+                  aria-hidden="true"
+                ></i>
+              </button>
+
+              <div
+                className={`site-mobile-services-panel${
+                  mobileServicesOpen ? " is-open" : ""
+                }`}
+                id="site-mobile-services-panel"
+                aria-hidden={mobileServicesOpen ? undefined : "true"}
+              >
+                <div
+                  className="site-mobile-services-inner"
+                  inert={mobileServicesOpen ? undefined : true}
+                >
+                  {SERVICES.map((service) => (
+                    <NavLink
+                      key={service.to}
+                      className={({ isActive }) =>
+                        `site-mobile-service-link${
+                          isActive ? " is-active" : ""
+                        }`
+                      }
+                      to={service.to}
+                      onClick={() => setMobileOpen(false)}
+                    >
+                      <i
+                        className={`bi ${service.icon}`}
+                        aria-hidden="true"
+                      ></i>
+                      <span>{service.label}</span>
+                    </NavLink>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <NavLink
+              className={({ isActive }) =>
+                `site-mobile-link${isActive ? " is-active" : ""}`
+              }
+              to="/about"
+              onClick={() => setMobileOpen(false)}
+            >
+              عن بصيرة
+              <i className="bi bi-chevron-left" aria-hidden="true"></i>
+            </NavLink>
+
+            {adminItem ? (
+              <NavLink
+                className={({ isActive }) =>
+                  `site-mobile-link${isActive ? " is-active" : ""}`
+                }
+                to={adminItem.to}
+                onClick={() => setMobileOpen(false)}
+              >
+                {adminItem.label}
+                <i className="bi bi-chevron-left" aria-hidden="true"></i>
+              </NavLink>
+            ) : null}
+          </nav>
+        ) : null}
       </header>
 
       {mobileOpen ? (
         <button
           type="button"
-          className="app-rail-backdrop"
+          className="site-nav-backdrop"
           aria-label="إغلاق قائمة التنقل"
-          onClick={closeMobile}
+          onClick={() => {
+            setMobileOpen(false);
+            menuButtonRef.current?.focus();
+          }}
         />
       ) : null}
-
-      <aside
-        className={`app-rail ${
-          expanded ? "is-expanded" : "is-collapsed"
-        } ${mobileOpen ? "is-mobile-open" : ""}`}
-        id="app-rail"
-        ref={railRef}
-        aria-label="التنقل الرئيسي"
-      >
-        <div className="rail-head">
-          <Link
-            className="rail-brand"
-            to="/"
-            aria-label="بصيرة، الصفحة الرئيسية"
-            title="بصيرة"
-            onClick={closeMobile}
-          >
-            <BasiraLogo size="md" />
-          </Link>
-
-          <button
-            type="button"
-            className="rail-icon rail-collapse"
-            onClick={toggleExpanded}
-            aria-label={expanded ? "طي قائمة التنقل" : "توسيع قائمة التنقل"}
-            title={expanded ? "طي القائمة" : "توسيع القائمة"}
-            aria-expanded={expanded}
-          >
-            <i
-              className={
-                expanded
-                  ? "bi bi-chevron-double-right"
-                  : "bi bi-chevron-double-left"
-              }
-              aria-hidden="true"
-            ></i>
-          </button>
-
-          <button
-            type="button"
-            className="rail-icon rail-close"
-            onClick={closeMobile}
-            aria-label="إغلاق قائمة التنقل"
-            title="إغلاق"
-          >
-            <i className="bi bi-x-lg" aria-hidden="true"></i>
-          </button>
-        </div>
-
-        <button
-          type="button"
-          className="rail-new"
-          onClick={handleNewChat}
-          disabled={isChat && busy}
-          aria-label="بدء محادثة جديدة"
-          title="محادثة جديدة"
-        >
-          <i className="bi bi-plus-lg" aria-hidden="true"></i>
-          <span className="rail-label">محادثة جديدة</span>
-        </button>
-
-        {expanded ? (
-          <label className="rail-search">
-            <i className="bi bi-search" aria-hidden="true"></i>
-            <span className="sr-only">
-              {searchHistory ? "البحث في المحادثات" : "البحث في القائمة"}
-            </span>
-            <input
-              ref={searchRef}
-              type="search"
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder={
-                searchHistory ? "ابحث في المحادثات…" : "ابحث في القائمة…"
-              }
-              aria-label={
-                searchHistory ? "البحث في المحادثات" : "البحث في القائمة"
-              }
-              autoComplete="off"
-            />
-            {searchQuery ? (
-              <button
-                type="button"
-                onClick={() => setSearchQuery("")}
-                aria-label="مسح البحث"
-                title="مسح البحث"
-              >
-                <i className="bi bi-x-circle" aria-hidden="true"></i>
-              </button>
-            ) : null}
-          </label>
-        ) : (
-          <button
-            type="button"
-            className="rail-icon rail-search-trigger"
-            onClick={focusSearch}
-            aria-label="بحث"
-            title="بحث"
-          >
-            <i className="bi bi-search" aria-hidden="true"></i>
-          </button>
-        )}
-
-        <div className="rail-body">
-          <nav className="rail-nav" aria-label="روابط الموقع">
-            {visibleNavItems.map((item) => (
-              <NavLink
-                className={({ isActive }) =>
-                  `rail-nav-item${isActive ? " is-active" : ""}`
-                }
-                to={item.to}
-                key={item.to}
-                end={item.end}
-                onClick={closeMobile}
-                title={item.label}
-              >
-                <i className={`bi ${item.icon}`} aria-hidden="true"></i>
-                <span className="rail-label">{item.label}</span>
-              </NavLink>
-            ))}
-          </nav>
-
-          {!searchHistory && query && visibleNavItems.length === 0 ? (
-            <p className="rail-history-empty">لا توجد نتائج مطابقة.</p>
-          ) : null}
-
-          {searchHistory ? (
-            <section
-              className="rail-history-section"
-              aria-label="المحادثات الحديثة"
-            >
-              <div className="rail-section-label">
-                <span>المحادثات</span>
-                <span>{formatNumber(visibleConversations.length)}</span>
-              </div>
-
-              {!loaded ? (
-                <div className="rail-history-skeleton" aria-hidden="true">
-                  <span className="skeleton"></span>
-                  <span className="skeleton"></span>
-                  <span className="skeleton"></span>
-                </div>
-              ) : visibleConversations.length === 0 ? (
-                <p className="rail-history-empty">
-                  {query
-                    ? "لا توجد نتائج مطابقة."
-                    : "لا توجد محادثات محفوظة بعد."}
-                </p>
-              ) : (
-                <div className="rail-history">
-                  {visibleConversations.map((item) => {
-                    const isActive =
-                      String(activeId) === String(item._id);
-
-                    return (
-                      <div
-                        className={`rail-history-row${
-                          isActive ? " is-active" : ""
-                        }`}
-                        key={item._id}
-                      >
-                        <button
-                          type="button"
-                          className={`rail-history-item${
-                            isActive ? " is-active" : ""
-                          }`}
-                          onClick={() => handleOpenConversation(item)}
-                          disabled={busy}
-                          aria-current={isActive ? "true" : undefined}
-                          title={conversationTitle(item)}
-                        >
-                          <i
-                            className="bi bi-chat-left-text"
-                            aria-hidden="true"
-                          ></i>
-                          <span>{conversationTitle(item)}</span>
-                        </button>
-
-                        <div className="rail-history-actions">
-                          <button
-                            type="button"
-                            className="rail-history-action"
-                            onClick={() => handleRename(item)}
-                            disabled={busy}
-                            aria-label={`تغيير اسم المحادثة: ${conversationTitle(
-                              item
-                            )}`}
-                            title="تغيير الاسم"
-                          >
-                            <i
-                              className="bi bi-pencil-square"
-                              aria-hidden="true"
-                            ></i>
-                          </button>
-                          <button
-                            type="button"
-                            className="rail-history-action danger"
-                            onClick={() => handleRemove(item)}
-                            disabled={busy}
-                            aria-label={`حذف المحادثة: ${conversationTitle(
-                              item
-                            )}`}
-                            title="حذف"
-                          >
-                            <i
-                              className="bi bi-trash3"
-                              aria-hidden="true"
-                            ></i>
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-          ) : null}
-        </div>
-
-        <div className="rail-footer">
-          <div className="rail-theme">
-            <span className="rail-label">المظهر</span>
-            <ThemeToggle />
-          </div>
-
-          <Link
-            className={`rail-settings${
-              location.pathname === "/profile" ? " is-active" : ""
-            }`}
-            to="/profile"
-            aria-label="الإعدادات والحساب"
-            title="الإعدادات"
-            onClick={closeMobile}
-          >
-            <i className="bi bi-sliders" aria-hidden="true"></i>
-            <span className="rail-label">الإعدادات</span>
-          </Link>
-
-          {authLoading ? (
-            <span className="rail-user rail-user-loading" aria-hidden="true" />
-          ) : user ? (
-            <Link
-              className="rail-user"
-              to="/profile"
-              title={displayName}
-              onClick={closeMobile}
-            >
-              <span className="avatar" aria-hidden="true">
-                {initials(displayName, "ب")}
-              </span>
-              <span className="rail-user-copy">
-                <strong>{displayName}</strong>
-                <span dir="ltr">{user.email}</span>
-              </span>
-            </Link>
-          ) : (
-            <Link
-              className="rail-signin"
-              to="/signin"
-              aria-label="تسجيل الدخول"
-              title="تسجيل الدخول"
-              onClick={closeMobile}
-            >
-              <i className="bi bi-person" aria-hidden="true"></i>
-              <span className="rail-label">تسجيل الدخول</span>
-            </Link>
-          )}
-        </div>
-      </aside>
     </>
   );
 }

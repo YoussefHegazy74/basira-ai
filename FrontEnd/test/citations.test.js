@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   citationSegments,
   citedSourceLabels,
+  displaySourceLabels,
   formatSourceLabel,
 } from "../src/utils/citations.js";
 
@@ -76,4 +77,53 @@ test("source labels support object metadata and unknown types", () => {
     "كتاب مبهم، ص 4",
   );
   assert.equal(formatSourceLabel({}), "");
+});
+
+test("displayed sources include only cited references when markers are present", () => {
+  const text = "الدليل في الحديث (مصدر 1).";
+  assert.deepEqual(displaySourceLabels(text, SOURCES), [
+    "حديث — سنن أبي داود:54",
+  ]);
+});
+
+test("displayed sources are deduplicated by readable label", () => {
+  const sources = [
+    "hadith — صحيح مسلم:2568",
+    "hadith — صحيح مسلم:2568",
+    "fiqh — فقه السنة، سيد سابق، الصيام (1/3)",
+  ];
+  const text = "الدليل (مصدر 1) وتأكيده (مصدر 2).";
+  assert.deepEqual(displaySourceLabels(text, sources), [
+    "حديث — صحيح مسلم:2568",
+  ]);
+});
+
+test("a refusal with retrieved sources displays no source chips", () => {
+  assert.deepEqual(
+    displaySourceLabels("لم أجد في المصادر المتاحة ما يجيب عن السؤال.", SOURCES),
+    [],
+  );
+});
+
+test("website help without citation markers keeps its fallback source", () => {
+  const sources = ["موقع بصيرة — دليل الاستخدام"];
+  assert.deepEqual(
+    displaySourceLabels("يمكنك استخدام صفحة التحقق من المنشورات.", sources),
+    ["موقع بصيرة — دليل الاستخدام"],
+  );
+});
+
+test("uncited answer does not display retrieved chunks that may be unrelated", () => {
+  assert.deepEqual(
+    displaySourceLabels("إجابة عامة دون إسناد صريح.", SOURCES),
+    [],
+  );
+});
+
+test("mixed answer keeps cited evidence and website help", () => {
+  const sources = [...SOURCES, "موقع بصيرة — دليل الاستخدام"];
+  assert.deepEqual(
+    displaySourceLabels("الحكم (مصدر 1). ولمساعدة الموقع اقرأ صفحة التحقق.", sources),
+    ["حديث — سنن أبي داود:54", "موقع بصيرة — دليل الاستخدام"],
+  );
 });

@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import AuthShell from "../components/AuthShell";
 import { useAuth } from "../context/AuthContext";
 import api from "../services/api";
-import { arabicMessage } from "../utils/format";
+import { loginErrorMessage } from "../utils/authErrors";
 import "../styles/auth.css";
 
 function SignIn() {
@@ -52,13 +52,7 @@ function SignIn() {
       setUser(loggedInUser);
       navigate("/", { replace: true });
     } catch (requestError) {
-      setError(
-        arabicMessage(
-          requestError.response?.data?.message ||
-            requestError.response?.data?.Message,
-          "تعذّر تسجيل الدخول. راجع البريد الإلكتروني وكلمة المرور وحاول مرة أخرى.",
-        ),
-      );
+      setError(loginErrorMessage(requestError));
     } finally {
       setLoading(false);
     }
